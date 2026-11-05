@@ -294,7 +294,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
     rows = db.all(
         "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.franchise, l.cel_id, c.gainax"
         " FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
-        " WHERE l.ok = 1 AND l.verdict = '' AND l.image != '' AND l.active = 1"
+        " WHERE l.ok = 1 AND l.verdict = '' AND l.image != ''"  # sold ones too: they hold a cel visible
         # Never asked first, newest first; then the longest since the last try, so failures rotate.
         " ORDER BY l.asked IS NOT NULL, l.asked, l.first_seen DESC LIMIT ?",
         limit,
