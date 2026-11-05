@@ -490,3 +490,26 @@ def test_item_pages_go_to_new_listings_then_the_longest_waiting(env, monkeypatch
     assert opened == ["yahoo:new", "yahoo:a2"]  # yahoo:a1 had its turn most recently
     tried = db.one("SELECT photos_tried FROM listings WHERE id = 'yahoo:a2'")["photos_tried"]
     assert tried > "2026-01-01 00:00:00"
+
+
+def test_further_photos_wait_for_the_main_one(env, monkeypatch):
+    s, db = env
+    _fake_photos(monkeypatch, {"u2": "seal.jpg"})  # the main photo u1 fails
+    raw = Raw(
+        "mercari:m10",
+        "Mercari",
+        "エヴァンゲリオン セル画 碇シンジ",
+        "https://example.invalid/m10",
+        img_url="u1",
+        yen=3500,
+        photos=["u2"],
+    )
+    llm = _Seen({"kind": "cel"})
+    sweep.ingest(db, s, llm, [raw], 200.0, False)
+    assert llm.calls == [[]]  # not the seal alone
+    assert db.one("SELECT recheck FROM listings WHERE id = 'mercari:m10'")["recheck"] == 1
+    assert sweep.backfill(db, llm, s) == 0  # waits for the main photo
+    _fake_photos(monkeypatch, {"u1": "main.jpg", "u2": "seal.jpg"})
+    sweep.ingest(db, s, llm, [raw], 200.0, False)  # the main photo arrives
+    sweep.backfill(db, llm, s)
+    assert ["main.jpg", "seal.jpg"] in llm.calls

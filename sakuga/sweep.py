@@ -321,7 +321,7 @@ def ingest(
         db.run(
             "INSERT INTO listings (id, source, cel_id, title, extra, url, img_url, image, phash, yen, gbp,"
             " info, auction, franchise, kind, verdict, ok, reason, first_seen, last_seen, photos,"
-            " photos_done) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " photos_done, recheck) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             raw.id,
             raw.source,
             cel_id,
@@ -344,6 +344,9 @@ def ingest(
             t,
             json.dumps(more),
             int(settled),  # 0: the rest are fetched again later, and the LLM asked again
+            int(
+                bool(more) and not image
+            ),  # withheld for want of the main photo: asked once it comes
         )
         if yen:
             db.run(
