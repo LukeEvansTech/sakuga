@@ -185,3 +185,96 @@ def test_known_listing_cut_below_the_floor_stays(env):
     got = sweep.ingest(db, s, LLM("", "", "claude"), [cut], 200.0, False)
     assert got["seen"] == {"yahoo:a2"}
     assert db.one("SELECT yen FROM listings WHERE id = 'yahoo:a2'")["yen"] == 2500
+
+
+class _Says(LLM):
+    def __init__(self, verdict):
+        super().__init__("", "", "claude")
+        self.verdict = verdict
+
+    def classify(self, title, extra, price, image):
+        return self.verdict
+
+
+def test_backfill_drops_cel_club_and_fills_titles(env):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg' WHERE id IN ('yahoo:a1', 'yahoo:a2')")
+    db.run("UPDATE listings SET first_seen = '2099-01-01 00:00:00' WHERE id = 'yahoo:a2'")
+    club = _Says({"kind": "cel", "cel_club": True})
+    assert sweep.backfill(db, club, s, limit=1) == 1  # newest first: yahoo:a2
+    gone = db.one("SELECT ok, reason, cel_id FROM listings WHERE id = 'yahoo:a2'")
+    assert (gone["ok"], gone["reason"]) == (0, "LLM: Cel Club")
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 1  # hidden, id kept
+    assert all(c["id"] != 2 for c in sweep.pending(db))
+    named = _Says({"kind": "cel", "title_en": "Rei in the entry plug", "notes": "no douga"})
+    assert sweep.backfill(db, named, s) == 1  # yahoo:a1; answered listings are not asked again
+    assert sweep.backfill(db, named, s) == 0
+    cel = db.one("SELECT title_en, notes FROM cels WHERE id = 1")
+    assert (cel["title_en"], cel["notes"]) == ("Rei Ayanami 1", "no douga")  # fills blanks only
+
+
+def test_backfill_rotates_failures_and_applies_gainax(env):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg'")
+    assert sweep.backfill(db, _Says(None), s, limit=2) == 0
+    tried = {r["id"] for r in db.all("SELECT id FROM listings WHERE asked IS NOT NULL")}
+    assert len(tried) == 2
+    sweep.backfill(db, _Says(None), s, limit=2)
+    assert (
+        db.one("SELECT COUNT(*) AS n FROM listings WHERE asked IS NULL")["n"] == 0
+    )  # the rest got a turn
+    gx = _Says({"kind": "reproduction", "gainax_limited": True, "title_en": "Kaworu 04/100"})
+    sweep.backfill(db, gx, s, limit=4)
+    assert db.one("SELECT gainax, kind FROM cels WHERE id = 3")["gainax"] == 1
+
+
+def test_relist_of_rejected_artwork_stays_out_when_the_llm_fails(env, monkeypatch):
+    s, db = env
+    h = "0f0f0f0f0f0f0f0f"
+    db.run(
+        "UPDATE listings SET image = 'a.jpg', phash = ?, first_seen = '2099-01-01 00:00:00'"
+        " WHERE id = 'yahoo:a2'",
+        h,
+    )
+    sweep.backfill(db, _Says({"kind": "cel", "cel_club": True}), s, limit=1)
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("r.jpg", h))
+    relist = Raw(
+        "mercari:r1",
+        "Mercari",
+        "エヴァンゲリオン セル画 綾波レイ",
+        "https://example.invalid/r",
+        yen=9000,
+    )
+    got = sweep.ingest(db, s, _Says(None), [relist], 200.0, False)
+    assert not got["new_cels"]
+    row = db.one("SELECT ok, reason FROM listings WHERE id = 'mercari:r1'")
+    assert (row["ok"], row["reason"]) == (0, "same photo as rejected yahoo:a2")
+
+
+def test_accepted_relist_brings_a_hidden_cel_back(env, monkeypatch):
+    s, db = env
+    h = "0f0f0f0f0f0f0f0f"
+    db.run("UPDATE listings SET image = 'a.jpg', phash = ? WHERE id = 'yahoo:a2'", h)
+    db.run("UPDATE cels SET phash = ? WHERE id = 2", h)
+    sweep.backfill(db, _Says({"kind": "print"}), s, limit=3)
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 1
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("r.jpg", h))
+    relist = Raw(
+        "mercari:r2",
+        "Mercari",
+        "エヴァンゲリオン セル画 綾波レイ",
+        "https://example.invalid/r",
+        yen=9000,
+    )
+    sweep.ingest(db, s, _Says({"kind": "cel"}), [relist], 200.0, False)
+    assert db.one("SELECT cel_id FROM listings WHERE id = 'mercari:r2'")["cel_id"] == 2
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 0
+
+
+def test_hidden_state_is_derived_from_sightings(env):
+    _, db = env
+    db.run("UPDATE listings SET ok = 0, verdict = '{}' WHERE id = 'yahoo:a1'")
+    db.run("UPDATE cels SET rejected = 1 WHERE id = 3")  # stale: its listings are accepted
+    sweep.reconcile_hidden(db)
+    got = {r["id"]: r["rejected"] for r in db.all("SELECT id, rejected FROM cels")}
+    assert got == {1: 1, 2: 0, 3: 0}

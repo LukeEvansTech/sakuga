@@ -29,7 +29,7 @@ CLASSIFY = """You catalogue Japanese anime production art for a collector. Read 
  "episode_cut": "e.g. ep 24 C-298, or empty",
  "background": true|false,
  "title_en": "a short English title for a catalogue card, under 70 characters",
- "notes": "one sentence on anything a collector would check (douga included, sketch, damage)"}
+ "notes": "one short sentence, under 200 characters, on anything a collector would check (douga included, sketch, damage)"}
 
 Definitions:
 - cel: a hand-painted production cel used in the anime (セル画), with or without background/douga.
@@ -84,7 +84,7 @@ class LLM:
     def on(self) -> bool:
         return bool(self.url)
 
-    def _ask(self, content: list[dict], max_tokens: int = 400) -> dict | None:
+    def _ask(self, content: list[dict], max_tokens: int = 1500) -> dict | None:
         body = json.dumps(
             {
                 "model": self.model,
@@ -153,6 +153,6 @@ class LLM:
     def same(self, a: Path, b: Path) -> bool | None:
         if not self.on or not a.exists() or not b.exists():
             return None
-        v = self._ask([{"type": "text", "text": SAME}, _image_part(a), _image_part(b)], 50)
+        v = self._ask([{"type": "text", "text": SAME}, _image_part(a), _image_part(b)], 200)
         same = v.get("same") if v else None
         return same if isinstance(same, bool) else None  # "false" as a string is not an answer

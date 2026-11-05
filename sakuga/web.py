@@ -139,10 +139,11 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
             sent = [
                 cel_view(db, r)
                 for r in db.all(
-                    "SELECT * FROM cels WHERE digest_id = ? ORDER BY first_seen DESC", last["id"]
+                    "SELECT * FROM cels WHERE digest_id = ? AND rejected = 0 ORDER BY first_seen DESC",
+                    last["id"],
                 )
             ]
-        total = db.one("SELECT COUNT(*) n FROM cels WHERE available = 1")
+        total = db.one("SELECT COUNT(*) n FROM cels WHERE available = 1 AND rejected = 0")
         return page(
             request,
             "today.html",
@@ -162,7 +163,7 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
         sort: str = "newest",
         show: str = "available",
     ):
-        where, args = ["1=1"], []
+        where, args = ["c.rejected = 0"], []
         if franchise in FRANCHISES:
             where.append("c.franchise = ?")
             args.append(franchise)
@@ -198,7 +199,7 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
         counts = {
             r["franchise"]: r["n"]
             for r in db.all(
-                "SELECT franchise, COUNT(*) n FROM cels WHERE available = 1 GROUP BY franchise"
+                "SELECT franchise, COUNT(*) n FROM cels WHERE available = 1 AND rejected = 0 GROUP BY franchise"
             )
         }
         return page(
@@ -286,7 +287,9 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
             " ORDER BY id DESC LIMIT 1"
         )
         last = db.one("SELECT status FROM runs WHERE status != 'running' ORDER BY id DESC LIMIT 1")
-        cels = db.one("SELECT COUNT(*) n, COALESCE(SUM(available),0) a FROM cels")
+        cels = db.one(
+            "SELECT COUNT(*) n, COALESCE(SUM(available),0) a FROM cels WHERE rejected = 0"
+        )
         t = parse_ts(ok["finished"]) if ok else None
         lines = [
             "# HELP sakuga_last_success_timestamp_seconds Finish time of the last sweep that read listings.",

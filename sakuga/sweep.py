@@ -177,6 +177,9 @@ def ingest(
             raw.title, raw.extra, price_text(yen, gbp), s.img_dir / image if image else None
         )
         k = catalog.keep(c["franchise"], c["kind"], verdict)
+        if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
+            # No answer this time, but the same photo was rejected before: a relist of that artwork.
+            k = catalog.Keep(False, twin["kind"], False, f"same photo as rejected {twin['id']}")
         cel_id = None
         if k.ok:
             kept += 1
@@ -203,7 +206,16 @@ def ingest(
                 )
                 new_cels.append(cel_id)
             else:
-                db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, cel_id)
+                # An accepted listing joining a cel hidden on a second look brings it back, as it now reads.
+                db.run(
+                    "UPDATE cels SET last_seen=?, available=1,"
+                    " kind = CASE WHEN rejected THEN ? ELSE kind END,"
+                    " gainax = CASE WHEN rejected THEN ? ELSE gainax END, rejected=0 WHERE id=?",
+                    t,
+                    k.kind,
+                    int(k.gainax),
+                    cel_id,
+                )
                 if image:
                     db.run(
                         "UPDATE cels SET image=?, phash=? WHERE id=? AND image=''",
@@ -244,6 +256,91 @@ def ingest(
                 yen,
             )
     return {"seen": seen, "kept": kept, "new_cels": new_cels}
+
+
+def rejected_twin(db: DB, franchise: str, ph: str):
+    """A listing the LLM rejected whose photo is this one (a relist), or None."""
+    if not ph:
+        return None
+    rows = db.all(
+        "SELECT id, kind, phash FROM listings WHERE franchise = ? AND ok = 0 AND verdict != ''"
+        " AND phash != ''",
+        franchise,
+    )
+    return next((r for r in rows if images.distance(ph, r["phash"]) <= catalog.NEAR), None)
+
+
+def reconcile_hidden(db: DB) -> None:
+    """A cel is hidden exactly when it has sightings and the LLM rejected all of them.
+
+    Derived once per sweep, so every path that moves listings (relists, late-photo regrouping) agrees.
+    """
+    with NOTIFY_LOCK:
+        db.run(
+            "UPDATE cels SET rejected = (EXISTS (SELECT 1 FROM listings l WHERE l.cel_id = cels.id)"
+            " AND NOT EXISTS (SELECT 1 FROM listings l WHERE l.cel_id = cels.id AND l.ok = 1))"
+        )
+
+
+MAX_BACKFILL = 10
+
+
+def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
+    """Ask the LLM again about kept listings it never answered for (a timeout, a cut-off reply).
+
+    The verdict counts as it would have on first sight: a Cel Club cel, print or drawing leaves the
+    catalogue (its cel is hidden if nothing else holds it), and kind and GAINAX follow the LLM. Returns the number answered.
+    """
+    rows = db.all(
+        "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.franchise, l.cel_id, c.gainax"
+        " FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
+        " WHERE l.ok = 1 AND l.verdict = '' AND l.image != ''"  # sold ones too: they hold a cel visible
+        # Never asked first, newest first; then the longest since the last try, so failures rotate.
+        " ORDER BY l.asked IS NOT NULL, l.asked, l.first_seen DESC LIMIT ?",
+        limit,
+    )
+    answered = 0
+    for r in rows:
+        db.run("UPDATE listings SET asked = ? WHERE id = ?", now(), r["id"])
+        verdict = llm.classify(
+            r["title"], r["extra"], price_text(r["yen"], r["gbp"]), s.img_dir / r["image"]
+        )
+        if not verdict:
+            continue
+        answered += 1
+        k = catalog.keep(r["franchise"], "gainax-limited" if r["gainax"] else "cel", verdict)
+        # One transaction per listing: an interruption leaves the listing and its cel consistent.
+        with NOTIFY_LOCK, db.tx() as con:
+            if not k.ok:
+                con.execute(
+                    "UPDATE listings SET verdict=?, ok=0, reason=?, kind=? WHERE id=?",
+                    (_json(verdict), k.reason, k.kind, r["id"]),
+                )
+                # Hidden, not deleted: its id stays out of reuse (alert links), and relists still match it.
+                con.execute(
+                    "UPDATE cels SET rejected = 1 WHERE id = ? AND NOT EXISTS"
+                    " (SELECT 1 FROM listings WHERE cel_id = cels.id AND ok = 1)",
+                    (r["cel_id"],),
+                )
+                log.info("listing %s dropped on a second look: %s", r["id"], k.reason)
+                continue
+            con.execute(
+                "UPDATE listings SET verdict=?, kind=? WHERE id=?",
+                (_json(verdict), k.kind, r["id"]),
+            )
+            con.execute(
+                "UPDATE cels SET title_en = CASE WHEN title_en = '' THEN ? ELSE title_en END,"
+                " notes = CASE WHEN notes = '' THEN ? ELSE notes END,"
+                " kind = ?, gainax = ? WHERE id = ?",
+                (
+                    verdict.get("title_en", ""),
+                    _notes(verdict),
+                    k.kind,
+                    int(k.gainax),  # the LLM decides GAINAX either way, as on first sight
+                    r["cel_id"],
+                ),
+            )
+    return answered
 
 
 def candidates(db: DB, franchise: str, exclude: int = 0) -> list[catalog.Candidate]:
@@ -392,12 +489,13 @@ def _instant(db: DB, s: Settings) -> list[str]:
     """
     out = []
     for cel in db.all(
-        "SELECT * FROM cels WHERE gainax = 1 AND baseline = 0 AND instant_sent IS NULL"
+        "SELECT * FROM cels WHERE gainax = 1 AND baseline = 0 AND instant_sent IS NULL AND rejected = 0"
         " AND digest_id IS NULL"
     ):
         cel_id = cel["id"]
         lst = db.one(
-            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY active DESC, first_seen LIMIT 1",
+            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? AND ok = 1"
+            " ORDER BY active DESC, first_seen LIMIT 1",
             cel_id,
         )
         price = price_text(lst["yen"], lst["gbp"]) if lst else ""
@@ -433,6 +531,8 @@ def run(
             db.put("yen_per_gbp", rate)
         baseline = not db.get("baselined", False)
         got = ingest(db, s, model, raws, rate, baseline)
+        backfill(db, model, s)
+        reconcile_hidden(db)
         retire(db, got["seen"], failed, partial, checked)
         alerts = instant(db, s) if notify_on else []
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")
@@ -479,7 +579,7 @@ def new_since_digest(db: DB) -> list:
     last = db.one("SELECT MAX(created) t FROM digests")
     since = last["t"] if last and last["t"] else ""
     return db.all(
-        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0"
+        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 AND rejected = 0"
         " AND (instant_sent IS NULL OR instant_sent >= ?) ORDER BY first_seen DESC",
         since,
     )
@@ -488,7 +588,7 @@ def new_since_digest(db: DB) -> list:
 def pending(db: DB) -> list:
     """Cels first seen since the last digest (the first sweep's catalogue is not news)."""
     return db.all(
-        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 AND instant_sent IS NULL"
+        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 AND instant_sent IS NULL AND rejected = 0"
         " ORDER BY first_seen DESC"
     )
 
@@ -514,7 +614,8 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
     ]
     for c in cels[:6]:
         lst = db.one(
-            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY active DESC, first_seen LIMIT 1",
+            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? AND ok = 1"
+            " ORDER BY active DESC, first_seen LIMIT 1",
             c["id"],
         )
         lines.append(

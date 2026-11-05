@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS cels (
     last_seen TEXT NOT NULL,
     available INTEGER NOT NULL DEFAULT 1,
     digest_id INTEGER,
-    instant_sent TEXT
+    instant_sent TEXT,
+    rejected INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS cels_first ON cels (first_seen);
 CREATE TABLE IF NOT EXISTS listings (
@@ -54,7 +55,8 @@ CREATE TABLE IF NOT EXISTS listings (
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    checked TEXT
+    checked TEXT,
+    asked TEXT
 );
 CREATE INDEX IF NOT EXISTS listings_cel ON listings (cel_id);
 CREATE TABLE IF NOT EXISTS prices (
@@ -108,6 +110,13 @@ class DB:
             cols = {r["name"] for r in c.execute("PRAGMA table_info(listings)")}
             if "checked" not in cols:  # added after the first release of the schema
                 c.execute("ALTER TABLE listings ADD COLUMN checked TEXT")
+            cel_cols = {r["name"] for r in c.execute("PRAGMA table_info(cels)")}
+            if (
+                "rejected" not in cel_cols
+            ):  # hidden by a later LLM verdict; kept for its id and history
+                c.execute("ALTER TABLE cels ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0")
+            if "asked" not in cols:  # when backfill last asked the LLM about this listing
+                c.execute("ALTER TABLE listings ADD COLUMN asked TEXT")
             # A sweep cut off by a restart never finishes; mark it so pages stop saying "Sweeping".
             c.execute(
                 "UPDATE runs SET status = 'interrupted', finished = started WHERE status = 'running'"
