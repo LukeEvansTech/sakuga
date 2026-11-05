@@ -61,7 +61,7 @@ JUNK = re.compile(
     r"原画集|設定資料|シール|ステッカー|アクリル|クリアファイル|下敷き|DVD|Blu-?ray|ブルーレイ|雑誌|アニメージュ|"
     r"付録|ZENBU|カタログ|フィルム|35mm|版画|ミストグラフ|キャラファイン|PSA|ブースター|メモリアル原画アート|テレカ|"
     r"テレホンカード|書籍|文庫|ムック|ポストカード|キーホルダー|缶バッジ|タペストリー|ジグソー|プライズ|景品|リペイント|カスタム|"
-    r"ichiban\s*kuji|sericel|seri-cel|gicl[eé]e|lithograph|fan\s*art|\bcustom\b|\bprize\b|cel\s+print|figure|\bcards?\b|poster|cel-style|doujin|sticker|acrylic|printed",
+    r"ichiban\s*kuji|sericel|seri-cel|gicl[eé]e|lithograph|fan\s*art|\bcustom\b|\bprize\b|cel\s+print|print(?:ed)?\s+cel|limited\s+print|print\s*club|figure|\bcards?\b|poster|cel-style|doujin|sticker|acrylic|printed",
     re.I,
 )
 # Cel Club (セル画倶楽部): mass-produced printed collectibles, never wanted. 俱 is the other form of 倶;
@@ -79,7 +79,13 @@ GENGA = re.compile(
     re.I,
 )
 # GAINAX's own limited reproduction cels (100 per cut, numbered, with certificate): wanted despite REPRO.
-GAINAX_LIMITED = re.compile(r"限定|/\s*100|ガイナックス|gainax|公式|シリアル", re.I)
+GAINAX_LIMITED = re.compile(
+    r"限定|/\s*100|ガイナックス|gainax|公式|シリアル|of\s*100\b|numbered", re.I
+)
+# A reproduction cel in the title's own words: Japanese, or how eBay sellers write it in English.
+REPRO_CEL = re.compile(
+    r"複製セル|(?:reproduction|repro\.?|replica)\s+(?:animation\s+|anime\s+)?cels?\b", re.I
+)
 
 
 NOT_EVA = re.compile(r"エヴァーガーデン|エヴァーグリーン|エヴァー|エヴァンス")
@@ -124,7 +130,7 @@ def classify(
     if (
         key == "eva"
         and REPRO.search(text)
-        and re.search(r"複製セル|reproduction cel", text, re.I)
+        and REPRO_CEL.search(text)
         and GAINAX_LIMITED.search(text)
         and not re.search(r"景品|プライズ", text)
     ):

@@ -25,7 +25,10 @@ QUERIES = {
     "eva": "evangelion",
     "pokemon": "pokemon",
 }
-LIMIT = 200  # the most one page holds; every search here is well under it (2026-11-05)
+LIMIT = 200  # the most one page holds
+MAX_PAGES = 5  # every search here fitted one page on 2026-11-05; more than 1,000 is a partial read
+# Without this filter the Browse API returns Buy It Now listings only (checked 2026-11-05).
+BUYING = "buyingOptions:{AUCTION|FIXED_PRICE}"
 
 
 class Client:
@@ -55,9 +58,9 @@ class Client:
         self._token, self._expires = d["access_token"], time.time() + int(d["expires_in"])
         return self._token
 
-    def search(self, q: str, category: str) -> dict:
+    def search(self, q: str, category: str, offset: int = 0) -> dict:
         url = f"{API}/buy/browse/v1/item_summary/search?" + urllib.parse.urlencode(
-            {"q": q, "category_ids": category, "limit": LIMIT}
+            {"q": q, "category_ids": category, "limit": LIMIT, "offset": offset, "filter": BUYING}
         )
         req = urllib.request.Request(
             url,
@@ -118,6 +121,21 @@ def parse(data: dict) -> Results:
     return out
 
 
+def read(client: Client, q: str, category: str) -> Results:
+    """Every page of one search; complete only when all the matches were read."""
+    out, offset = Results(), 0
+    for _ in range(MAX_PAGES):
+        data = client.search(q, category, offset)
+        got = parse(data)
+        out += got
+        offset += len(data.get("itemSummaries") or [])
+        if offset >= int(data.get("total", 0)) or not data.get("itemSummaries"):
+            out.complete = True
+            return out
+    out.complete = False
+    return out
+
+
 def jobs(client: Client) -> list:
     """(name, family, fn) per search, in the shape sources.jobs uses; fn ignores the browser page."""
     out = []
@@ -129,7 +147,7 @@ def jobs(client: Client) -> list:
                     (
                         f"ebay:{query}:{cat}",
                         "eBay",
-                        lambda _page, query=query, cat=cat: parse(client.search(query, cat)),
+                        lambda _page, query=query, cat=cat: read(client, query, cat),
                     )
                 )
     return out

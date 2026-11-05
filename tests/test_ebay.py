@@ -80,5 +80,50 @@ def test_english_titles():
     assert (
         k("Pokemon Charizard Meiji Dairies Art Panel Cel Prize Rare Complete Japan", 250000) is None
     )
+    # GAINAX's numbered limited reproductions are wanted in English too; print cels are not.
+    gx = "Evangelion GAINAX Limited Repro Cel Kaworu Nagisa No.04/100 with certificate"
+    assert k(gx, 300000) == ("eva", "gainax-limited")
+    assert k("Neon Genesis Evangelion Reproduction Animation Cel numbered 12 of 100", 90000) == (
+        "eva",
+        "gainax-limited",
+    )
+    assert (
+        k("Evangelion Rei Ayanami Reproduction Cel Art Sheet 297x210mm A4 Display Japan", 30000)
+        is None
+    )
+    assert (
+        k("Evangelion Print Club Limited Cel Misato Katsuragi Anime Used [Age 13+]", 14000) is None
+    )
+    assert k("Evangelion Limited Print Cel Art Rei Ayanami", 16000) is None
+    assert (
+        k("Evangelion Limited Paint Asuka Langley SEGA Cellu Club Reproduction Cel Rare", 96000)
+        is None
+    )
     # Japanese titles still name the franchise only in Japanese.
     assert classify("Evangelion セル画", "", 9000, True) is None
+
+
+class _Pages(ebay.Client):
+    def __init__(self, total, per_page):
+        super().__init__("id", "secret")
+        self.total, self.per_page = total, per_page
+
+    def search(self, q, category, offset=0):
+        n = max(0, min(self.per_page, self.total - offset))
+        items = [
+            {
+                "itemId": f"v1|{offset + i}|0",
+                "title": "Evangelion cel",
+                "itemWebUrl": f"https://e/{offset + i}",
+            }
+            for i in range(n)
+        ]
+        return {"total": self.total, "itemSummaries": items}
+
+
+def test_read_follows_pages_and_marks_cut_off_reads():
+    got = ebay.read(_Pages(450, 200), "evangelion cel", "1529")
+    assert len(got) == 450 and got.complete
+    big = ebay.read(_Pages(5000, 200), "pokemon cel", "1529")
+    assert len(big) == 1000 and not big.complete
+    assert ebay.read(_Pages(0, 200), "broly cell", "69528").complete

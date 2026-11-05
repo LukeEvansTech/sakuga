@@ -30,6 +30,15 @@ def now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def search_jobs(s: Settings) -> list:
+    """Every search this sweep runs: the browser sites, and eBay when its keys are set."""
+    if not (s.ebay_client_id and s.ebay_client_secret):
+        return jobs()
+    return jobs() + ebay.jobs(
+        ebay.Client(s.ebay_client_id, s.ebay_client_secret, s.ebay_marketplace)
+    )
+
+
 def collect(
     s: Settings, db: DB, run_id: int, check: list[str] | None = None
 ) -> tuple[list[Raw], set[str], set[str], dict[str, bool | None]]:
@@ -48,12 +57,7 @@ def collect(
                 locale="ja-JP", user_agent=UA, viewport={"width": 1366, "height": 900}
             )
             page = ctx.new_page()
-            client = (
-                ebay.Client(s.ebay_client_id, s.ebay_client_secret, s.ebay_marketplace)
-                if s.ebay_client_id and s.ebay_client_secret
-                else None
-            )
-            for name, family, fn in jobs() + (ebay.jobs(client) if client else []):
+            for name, family, fn in search_jobs(s):
                 started, got, err = time.monotonic(), None, ""
                 for attempt in range(1, s.tries + 1):
                     try:
@@ -125,6 +129,7 @@ def _same_fn(db: DB, llm: LLM, img_dir: Path, listing_id: str, image: str):
 
 # The sources of the first release: a catalogue baselined before baselined_sources existed had read them.
 FIRST_SOURCES = ("Yahoo", "Mercari", "Mandarake", "Mandarake auction")
+ALL_SOURCES = (*FIRST_SOURCES, "eBay")
 
 
 def ingest(
@@ -549,21 +554,26 @@ def run(
         if rate:
             db.put("yen_per_gbp", rate)
         baseline = not db.get("baselined", False)
-        # A source added later gets its own quiet first read, as the whole catalogue did.
+        # A source added later gets its own quiet first read, as the whole catalogue did; it counts
+        # as read once every one of its searches has succeeded, even with no results.
+        families = {family for _, family, _ in search_jobs(s)}
         known = db.get("baselined_sources", None)
         if known is None:
             known = list(FIRST_SOURCES) if not baseline else []
-        quiet = {r.source for r in raws} - set(known)
+        quiet = families - set(known)
         got = ingest(db, s, model, raws, rate, baseline, quiet)
         backfill(db, model, s)
         reconcile_hidden(db)
-        retire(db, got["seen"], failed, partial, checked)
+        # A source not searched at all this sweep (eBay without keys) proves nothing about its listings.
+        unsearched = set(ALL_SOURCES) - families
+        retire(db, got["seen"], failed | unsearched, partial, checked)
         alerts = instant(db, s) if notify_on else []
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")
         if baseline and ok_jobs:
             db.put("baselined", True)
-        if quiet or db.get("baselined_sources", None) is None:
-            db.put("baselined_sources", sorted(set(known) | quiet))
+        done = quiet - failed if ok_jobs else set()
+        if done or db.get("baselined_sources", None) is None:
+            db.put("baselined_sources", sorted(set(known) | done))
         db.run(
             "UPDATE runs SET finished=?, status=?, listings=?, kept=?, new_cels=?, llm_calls=?, llm_cost=?,"
             " alerts=? WHERE id=?",
