@@ -390,17 +390,17 @@ class _Seen(LLM):
         return self.verdict
 
 
-def _fake_download(names):
-    def download(url, *_a, **_k):
-        return (names[url], "0f0f0f0f0f0f0f0f") if url in names else ("", "")
-
-    return download
+def _fake_photos(monkeypatch, names):
+    """Photos by URL: a name downloads, '' is gone for good, None fails this time."""
+    monkeypatch.setattr(
+        sweep.images, "download", lambda url, *_a, **_k: (names.get(url) or "", "0f0f0f0f0f0f0f0f")
+    )
+    monkeypatch.setattr(sweep.images, "download_more", lambda url, *_a, **_k: names.get(url, ""))
 
 
 def test_a_new_listing_is_judged_on_its_further_photos(env, monkeypatch):
     s, db = env
-    names = {"u1": "main.jpg", "u2": "two.jpg", "u3": "seal.jpg"}
-    monkeypatch.setattr(sweep.images, "download", _fake_download(names))
+    _fake_photos(monkeypatch, {"u1": "main.jpg", "u2": "two.jpg", "u3": "seal.jpg"})
     raw = Raw(
         "mercari:m9",
         "Mercari",
@@ -421,8 +421,15 @@ def test_a_new_listing_is_judged_on_its_further_photos(env, monkeypatch):
 def test_a_kept_listing_is_asked_again_once_its_photos_arrive(env, monkeypatch):
     s, db = env
     db.run("UPDATE listings SET image = 'a.jpg', verdict = '{\"kind\": \"cel\"}'")
-    monkeypatch.setattr(sweep.images, "download", _fake_download({"p2": "seal.jpg"}))
+    _fake_photos(monkeypatch, {"p2": "seal.jpg", "p4": None})
+    db.run(
+        "INSERT INTO listings (id, source, cel_id, title, url, franchise, kind, first_seen, last_seen,"
+        " image) VALUES ('yahoo:a4', 'Yahoo', 3, 'セル画', 'https://x.invalid', 'eva', 'cel', ?, ?, '')",
+        T,
+        T,
+    )
     again = [
+        Raw("yahoo:a4", "Yahoo", "セル画", "https://example.invalid/x", photos=["p2", "p4"]),
         Raw("yahoo:a2", "Yahoo", "セル画", "https://example.invalid/x", yen=120000, photos=["p2"]),
         Raw("yahoo:a1", "Yahoo", "セル画", "https://example.invalid/x", yen=120000, photos=[]),
         Raw("yahoo:a3", "Yahoo", "セル画", "https://example.invalid/x", yen=120000),  # not gathered
@@ -432,9 +439,15 @@ def test_a_kept_listing_is_asked_again_once_its_photos_arrive(env, monkeypatch):
     assert got["yahoo:a2"] == ('["seal.jpg"]', 1)
     assert got["yahoo:a1"] == ("[]", 0)  # nothing more to see: no second call
     assert got["yahoo:a3"] == (None, 0)  # tried again next sweep
+    assert got["yahoo:a4"] == (None, 0)  # p4 failed this time: the whole set waits for next sweep
+    _fake_photos(monkeypatch, {"p2": "seal.jpg", "p4": "back.jpg"})
+    sweep.ingest(db, s, _Seen(None), again[:1], 200.0, False)
+    assert db.one("SELECT photos FROM listings WHERE id = 'yahoo:a4'")["photos"] == (
+        '["seal.jpg", "back.jpg"]'
+    )
     llm = _Seen({"kind": "cel", "cel_club": True})
-    assert sweep.backfill(db, llm, s) == 1
-    assert llm.calls == [["a.jpg", "seal.jpg"]]
+    assert sweep.backfill(db, llm, s) == 2
+    assert sorted(llm.calls) == [["a.jpg", "seal.jpg"], ["seal.jpg", "back.jpg"]]  # no main photo
     row = db.one("SELECT ok, recheck FROM listings WHERE id = 'yahoo:a2'")
     assert (row["ok"], row["recheck"]) == (0, 0)
     assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 1
@@ -459,3 +472,20 @@ def test_photos_are_gathered_only_for_listings_the_llm_will_read(env):
     assert got["mercari:m77"][0].endswith("/m77_2.jpg") and len(got["mercari:m77"]) == 2
     assert got["mercari:m78"] is None and got["yahoo:a1"] is None
     assert got["mercari:m3"][1].endswith("/m3_3.jpg")
+
+
+def test_item_pages_go_to_new_listings_then_the_longest_waiting(env, monkeypatch):
+    _, db = env
+    monkeypatch.setattr(sweep, "MAX_PHOTO_PAGES", 2)
+    opened = []
+    monkeypatch.setattr(sweep, "more_photos", lambda _p, raw: opened.append(raw.id) or [])
+    db.run("UPDATE listings SET photos_tried = '2026-01-02 00:00:00' WHERE id = 'yahoo:a1'")
+    db.run("UPDATE listings SET photos_tried = '2026-01-01 00:00:00' WHERE id = 'yahoo:a2'")
+    raws = [
+        Raw("yahoo:a1", "Yahoo", "セル画", "https://x.invalid"),
+        Raw("yahoo:a2", "Yahoo", "セル画", "https://x.invalid"),
+        Raw("yahoo:new", "Yahoo", "エヴァンゲリオン セル画", "https://x.invalid", yen=9000),
+    ]
+    sweep.gather_photos(None, db, raws)
+    assert opened == ["yahoo:new", "yahoo:a2"]  # yahoo:a1 had its turn most recently
+    assert db.one("SELECT photos_tried FROM listings WHERE id = 'yahoo:a2'")["photos_tried"] > "2026-01-01 00:00:00"

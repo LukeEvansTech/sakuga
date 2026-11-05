@@ -139,27 +139,28 @@ MAX_PHOTO_PAGES = 40  # item pages opened per sweep for photos (Yahoo); the rest
 def gather_photos(page, db: DB, raws: list[Raw]) -> None:
     """Find the further photos of each listing the LLM will read: a new one past the title filter,
     or a kept one whose further photos were never stored. raw.photos stays None where unknown."""
-    pages, done = 0, set()
+    todo: list[tuple[str, Raw]] = []  # (last tried, listing): new ones first, then the longest waiting
+    done: set[str] = set()
     for raw in raws:
+        raw.photos = raw.photos if raw.source == "eBay" else None
         if raw.id in done:
             continue
         done.add(raw.id)
-        old = db.one("SELECT ok, photos FROM listings WHERE id = ?", raw.id)
+        old = db.one("SELECT ok, photos, photos_tried FROM listings WHERE id = ?", raw.id)
         if old:
-            wanted = bool(old["ok"]) and old["photos"] is None
-        else:
-            wanted = bool(
-                filters.classify(
-                    raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction, raw.lang == "en"
-                )
-            )
-        if not wanted:
-            continue
+            if old["ok"] and old["photos"] is None:
+                todo.append((old["photos_tried"] or "0", raw))
+        elif filters.classify(
+            raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction, raw.lang == "en"
+        ):
+            todo.append(("", raw))
+    pages = 0
+    for _, raw in sorted(todo, key=lambda x: x[0]):
         if raw.source == "Yahoo":
             if pages >= MAX_PHOTO_PAGES:
-                raw.photos = None
                 continue
             pages += 1
+            db.run("UPDATE listings SET photos_tried = ? WHERE id = ?", now(), raw.id)
         try:
             raw.photos = more_photos(page, raw)
         except Exception as e:  # pylint: disable=broad-exception-caught
@@ -167,14 +168,17 @@ def gather_photos(page, db: DB, raws: list[Raw]) -> None:
             raw.photos = None
 
 
-def _download_more(raw: Raw, img_dir: Path) -> list[str]:
-    """Store the listing's further photos; the files that arrived."""
-    out = []
+def _download_more(raw: Raw, img_dir: Path) -> tuple[list[str], bool]:
+    """Store the listing's further photos: the files that arrived, and whether every one was
+    settled (fetched, or gone for good). An unsettled set is fetched again on a later sweep."""
+    out, settled = [], raw.photos is not None
     for url in raw.photos or []:
-        name, _ = images.download(url, img_dir, referer=raw.url, quiet=raw.source == "Mercari")
-        if name and name not in out:
+        name = images.download_more(url, img_dir, referer=raw.url)
+        if name is None:
+            settled = False
+        elif name and name not in out:
             out.append(name)
-    return out
+    return out, settled
 
 
 def ingest(
@@ -228,14 +232,15 @@ def ingest(
                         )
                         regroup(db, llm, s, raw, old["cel_id"], image, ph)
             if old["ok"] and old["photos"] is None and raw.photos is not None:
-                more = _download_more(raw, s.img_dir)
-                # The LLM judged it from the main photo alone: ask again with the rest (a Cel Club seal).
-                db.run(
-                    "UPDATE listings SET photos=?, recheck=? WHERE id=?",
-                    json.dumps(more),
-                    int(bool(more)),
-                    raw.id,
-                )
+                more, settled = _download_more(raw, s.img_dir)
+                if settled:
+                    # The LLM judged it without these photos: ask again with them (a Cel Club seal).
+                    db.run(
+                        "UPDATE listings SET photos=?, recheck=? WHERE id=?",
+                        json.dumps(more),
+                        int(bool(more)),
+                        raw.id,
+                    )
             if old["ok"] and old["cel_id"]:
                 kept += 1
                 db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, old["cel_id"])
@@ -249,7 +254,7 @@ def ingest(
             continue
         seen.add(raw.id)
         image, ph = images.download(raw.img_url, s.img_dir, referer=raw.url)
-        more = _download_more(raw, s.img_dir)
+        more, settled = _download_more(raw, s.img_dir)
         verdict = llm.classify(
             raw.title,
             raw.extra,
@@ -328,7 +333,7 @@ def ingest(
             k.reason,
             t,
             t,
-            None if raw.photos is None else json.dumps(more),  # NULL: gathered on a later sweep
+            json.dumps(more) if settled else None,  # NULL: fetched again, and asked again, later
         )
         if yen:
             db.run(
@@ -377,7 +382,8 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
     rows = db.all(
         "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id,"
         " c.gainax FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
-        " WHERE l.ok = 1 AND (l.verdict = '' OR l.recheck = 1) AND l.image != ''"  # sold ones too: they hold a cel visible
+        " WHERE l.ok = 1 AND (l.verdict = '' OR l.recheck = 1)"
+        " AND (l.image != '' OR COALESCE(l.photos, '[]') != '[]')"  # sold ones too: they hold a cel visible
         # Never asked first, newest first; then the longest since the last try, so failures rotate.
         " ORDER BY l.asked IS NOT NULL, l.asked, l.first_seen DESC LIMIT ?",
         limit,
@@ -390,7 +396,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
             r["title"],
             r["extra"],
             price_text(r["yen"], r["gbp"]),
-            [s.img_dir / f for f in [r["image"], *more]],
+            [s.img_dir / f for f in [r["image"], *more] if f],
         )
         if not verdict:
             continue

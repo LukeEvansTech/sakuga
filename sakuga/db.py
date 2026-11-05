@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS listings (
     checked TEXT,
     asked TEXT,
     photos TEXT,
-    recheck INTEGER NOT NULL DEFAULT 0
+    recheck INTEGER NOT NULL DEFAULT 0,
+    photos_tried TEXT
 );
 CREATE INDEX IF NOT EXISTS listings_cel ON listings (cel_id);
 CREATE TABLE IF NOT EXISTS prices (
@@ -123,6 +124,8 @@ class DB:
                 c.execute("ALTER TABLE listings ADD COLUMN photos TEXT")
             if "recheck" not in cols:  # new photos arrived after the LLM's verdict: ask again
                 c.execute("ALTER TABLE listings ADD COLUMN recheck INTEGER NOT NULL DEFAULT 0")
+            if "photos_tried" not in cols:  # when an item page was last opened for its photos
+                c.execute("ALTER TABLE listings ADD COLUMN photos_tried TEXT")
             # A sweep cut off by a restart never finishes; mark it so pages stop saying "Sweeping".
             c.execute(
                 "UPDATE runs SET status = 'interrupted', finished = started WHERE status = 'running'"

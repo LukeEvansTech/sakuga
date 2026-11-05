@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -73,13 +74,26 @@ def store(raw: bytes, img_dir: Path) -> tuple[str, str]:
     return name, h
 
 
-def download(url: str, img_dir: Path, referer: str = "", quiet: bool = False) -> tuple[str, str]:
-    """(file, phash), or ('', '') when the photo cannot be fetched: the listing is kept either way.
-    quiet for guessed URLs (Mercari's photo 3), where a missing photo is expected."""
+def download(url: str, img_dir: Path, referer: str = "") -> tuple[str, str]:
+    """(file, phash), or ('', '') when the photo cannot be fetched: the listing is kept either way."""
     if not url:
         return "", ""
     try:
         return store(fetch(url, referer), img_dir)
     except Exception as e:  # pylint: disable=broad-exception-caught
-        (log.debug if quiet else log.warning)("image %s: %s", url[:120], type(e).__name__)
+        log.warning("image %s: %s", url[:120], type(e).__name__)
         return "", ""
+
+
+def download_more(url: str, img_dir: Path, referer: str = "") -> str | None:
+    """A further photo's file; '' when the site says there is no such photo (Mercari's guessed
+    photo 3 answers 403), None when it could not be fetched this time (worth another try)."""
+    try:
+        return store(fetch(url, referer), img_dir)[0]
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 404, 410):
+            return ""
+        log.warning("image %s: HTTP %s", url[:120], e.code)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        log.warning("image %s: %s", url[:120], type(e).__name__)
+    return None
