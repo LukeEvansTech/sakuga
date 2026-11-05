@@ -245,13 +245,17 @@ def mercari_available(page, url: str) -> bool | None:
     """Whether a Mercari item is still for sale: True, False, or None when the page did not say.
 
     The item page's buy box reads 今すぐBuyeeで購入 while it is for sale and "See more items!" once
-    sold (checked 2026-11-05); a removed item has no buy box and no Mercari title.
+    sold; a removed item answers HTTP 404 with 見つかりません (all checked 2026-11-05). Anything else
+    (an error, a bot check) is inconclusive, never proof of removal.
     """
-    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    resp = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    if resp is not None and resp.status == 404:
+        page.wait_for_timeout(1500)
+        return False if "見つかりません" in page.content() else None
     try:
         page.wait_for_selector('[data-testid="checkout-button-container"]', timeout=15000)
     except Exception:  # pylint: disable=broad-exception-caught
-        return False if "メルカリ" not in page.title() else None
+        return None
     text = page.inner_text('[data-testid="checkout-button-container"]')
     if "購入" in text:
         return True

@@ -281,10 +281,11 @@ def _cutoff() -> str:
 
 
 def to_check(db: DB) -> list[str]:
-    """Stale Mercari listings whose own page decides whether they retire, oldest first."""
+    """Stale Mercari listings whose own page decides whether they retire: never checked first, then
+    the longest since their last check, so an inconclusive page does not hold the queue."""
     rows = db.all(
         "SELECT url FROM listings WHERE active = 1 AND source = 'Mercari' AND last_seen < ?"
-        " ORDER BY last_seen LIMIT ?",
+        " ORDER BY checked IS NOT NULL, checked, last_seen LIMIT ?",
         _cutoff(),
         MAX_CHECKS,
     )
@@ -304,10 +305,12 @@ def retire(
         src = r["source"]
         if r["id"] in seen or src in failed:
             continue
-        if src in READ_WHOLE and src not in partial:
-            gone = True
+        if src in READ_WHOLE:
+            gone = src not in partial  # a truncated read proves nothing about what it left out
         elif src == "Mercari":
             verdict = checked.get(r["url"])
+            if r["url"] in checked:
+                db.run("UPDATE listings SET checked = ? WHERE id = ?", now(), r["id"])
             if verdict:  # still for sale outside the search window
                 db.run("UPDATE listings SET last_seen = ? WHERE id = ?", now(), r["id"])
             gone = verdict is False

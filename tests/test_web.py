@@ -112,6 +112,11 @@ def test_retire_needs_complete_reads_and_mercari_proof(env):
     sweep.retire(db, seen=set(), failed=set(), partial={"Mandarake"}, checked={})
     active = {r["id"] for r in db.all("SELECT id FROM listings WHERE active = 1")}
     assert {"yahoo:a2", "mercari:m3"} <= active  # partial read; Mercari page not checked
+    db.run("UPDATE listings SET last_seen = '2026-01-01 09:00:00' WHERE id = 'yahoo:a2'")
+    sweep.retire(db, seen=set(), failed=set(), partial={"Mandarake"}, checked={})
+    assert db.one("SELECT active FROM listings WHERE id = 'yahoo:a2'")["active"] == 1  # not by age
+    sweep.retire(db, seen=set(), failed=set(), checked={"https://example.invalid/m": None})
+    assert db.one("SELECT checked FROM listings WHERE id = 'mercari:m3'")["checked"]  # rotates
     sweep.retire(db, seen=set(), failed={"Mercari"}, checked={"https://example.invalid/m": False})
     assert (
         db.one("SELECT active FROM listings WHERE id = 'mercari:m3'")["active"] == 1
