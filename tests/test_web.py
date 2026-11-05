@@ -210,3 +210,18 @@ def test_backfill_drops_cel_club_and_fills_titles(env):
     assert sweep.backfill(db, named, s) == 0
     cel = db.one("SELECT title_en, notes FROM cels WHERE id = 1")
     assert (cel["title_en"], cel["notes"]) == ("Rei Ayanami 1", "no douga")  # fills blanks only
+
+
+def test_backfill_rotates_failures_and_applies_gainax(env):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg'")
+    assert sweep.backfill(db, _Says(None), s, limit=2) == 0
+    tried = {r["id"] for r in db.all("SELECT id FROM listings WHERE asked IS NOT NULL")}
+    assert len(tried) == 2
+    sweep.backfill(db, _Says(None), s, limit=2)
+    assert (
+        db.one("SELECT COUNT(*) AS n FROM listings WHERE asked IS NULL")["n"] == 0
+    )  # the rest got a turn
+    gx = _Says({"kind": "reproduction", "gainax_limited": True, "title_en": "Kaworu 04/100"})
+    sweep.backfill(db, gx, s, limit=4)
+    assert db.one("SELECT gainax, kind FROM cels WHERE id = 3")["gainax"] == 1

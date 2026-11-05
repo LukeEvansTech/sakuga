@@ -252,18 +252,20 @@ MAX_BACKFILL = 10
 def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
     """Ask the LLM again about kept listings it never answered for (a timeout, a cut-off reply).
 
-    It may only narrow, as on first sight: a Cel Club cel, print or drawing leaves the catalogue,
-    and a cel left with no kept listing goes with it. Returns the number answered.
+    The verdict counts as it would have on first sight: a Cel Club cel, print or drawing leaves the
+    catalogue (with its cel if nothing else holds it), and kind and GAINAX follow the LLM. Returns the number answered.
     """
     rows = db.all(
         "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.franchise, l.cel_id, c.gainax"
         " FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
         " WHERE l.ok = 1 AND l.verdict = '' AND l.image != '' AND l.active = 1"
-        " ORDER BY l.first_seen DESC LIMIT ?",
+        # Never asked first, newest first; then the longest since the last try, so failures rotate.
+        " ORDER BY l.asked IS NOT NULL, l.asked, l.first_seen DESC LIMIT ?",
         limit,
     )
     answered = 0
     for r in rows:
+        db.run("UPDATE listings SET asked = ? WHERE id = ?", now(), r["id"])
         verdict = llm.classify(
             r["title"], r["extra"], price_text(r["yen"], r["gbp"]), s.img_dir / r["image"]
         )
@@ -293,10 +295,11 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
                 db.run(
                     "UPDATE cels SET title_en = CASE WHEN title_en = '' THEN ? ELSE title_en END,"
                     " notes = CASE WHEN notes = '' THEN ? ELSE notes END,"
-                    " gainax = gainax AND ? WHERE id = ?",
+                    " kind = ?, gainax = ? WHERE id = ?",
                     verdict.get("title_en", ""),
                     _notes(verdict),
-                    int(k.gainax),
+                    k.kind,
+                    int(k.gainax),  # the LLM decides GAINAX either way, as on first sight
                     r["cel_id"],
                 )
     return answered

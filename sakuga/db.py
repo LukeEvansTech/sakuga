@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS listings (
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    checked TEXT
+    checked TEXT,
+    asked TEXT
 );
 CREATE INDEX IF NOT EXISTS listings_cel ON listings (cel_id);
 CREATE TABLE IF NOT EXISTS prices (
@@ -108,6 +109,8 @@ class DB:
             cols = {r["name"] for r in c.execute("PRAGMA table_info(listings)")}
             if "checked" not in cols:  # added after the first release of the schema
                 c.execute("ALTER TABLE listings ADD COLUMN checked TEXT")
+            if "asked" not in cols:  # when backfill last asked the LLM about this listing
+                c.execute("ALTER TABLE listings ADD COLUMN asked TEXT")
             # A sweep cut off by a restart never finishes; mark it so pages stop saying "Sweeping".
             c.execute(
                 "UPDATE runs SET status = 'interrupted', finished = started WHERE status = 'running'"
