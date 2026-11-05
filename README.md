@@ -12,7 +12,7 @@ sweep (every 30 min) ─▶ Buyee / Mercari / Mandarake shop + auctions (headles
                      ─▶ eBay through the Browse API (UK marketplace, prices in pounds), when keys are set
                      ─▶ regular expression first pass (franchise from the title, prints and goods dropped)
                      ─▶ photo saved + perceptual hash
-                     ─▶ LLM reads title + photo once: cel / genga / reproduction / print, English title
+                     ─▶ LLM reads title + up to 3 photos once: cel / genga / print / Cel Club, English title
                      ─▶ same cel as one already catalogued? (pHash; LLM compares borderline photos)
                      ─▶ listings not seen any more retire; a cel stays available while any listing is
 digest (08:00)       ─▶ one alert for the cels first seen since the last digest
