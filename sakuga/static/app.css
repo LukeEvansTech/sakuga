@@ -794,3 +794,8 @@ details summary {
     transition: none !important;
   }
 }
+
+.facts code {
+  font: inherit;
+  color: var(--gold);
+}

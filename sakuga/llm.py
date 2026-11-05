@@ -130,10 +130,21 @@ class LLM:
             "not_art",
         }:
             return None
-        return v
+        # Normalise every field ingestion reads: a null or wrong type falls back to empty.
+        out: dict = {"kind": v["kind"]}
+        for k in ("franchise", "episode_cut", "title_en", "notes"):
+            out[k] = v[k] if isinstance(v.get(k), str) else ""
+        for k in ("gainax_limited", "background"):
+            out[k] = v.get(k) is True
+        chars = v.get("characters")
+        out["characters"] = (
+            [c for c in chars if isinstance(c, str)] if isinstance(chars, list) else []
+        )
+        return out
 
     def same(self, a: Path, b: Path) -> bool | None:
         if not self.on or not a.exists() or not b.exists():
             return None
         v = self._ask([{"type": "text", "text": SAME}, _image_part(a), _image_part(b)], 50)
-        return bool(v["same"]) if v and "same" in v else None
+        same = v.get("same") if v else None
+        return same if isinstance(same, bool) else None  # "false" as a string is not an answer

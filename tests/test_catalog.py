@@ -73,3 +73,18 @@ def test_keep_rules():
     assert not keep("eva", "gainax-limited", {"kind": "reproduction", "gainax_limited": False}).ok
     assert not keep("broly", "cel", {"kind": "genga"}).ok
     assert keep("fma", "genga", {"kind": "douga"}).ok
+
+
+def test_llm_answers_are_type_checked(monkeypatch, tmp_path):
+    from sakuga.llm import LLM  # pylint: disable=import-outside-toplevel
+
+    m = LLM("http://llm.invalid", "k", "claude")
+    img = tmp_path / "a.jpg"
+    img.write_bytes(b"x")
+    monkeypatch.setattr(m, "_ask", lambda *a, **k: {"same": "false"})
+    assert m.same(img, img) is None
+    monkeypatch.setattr(
+        m, "_ask", lambda *a, **k: {"kind": "cel", "title_en": None, "characters": "Rei"}
+    )
+    v = m.classify("t", "", "", None)
+    assert v and v["title_en"] == "" and v["characters"] == [] and v["gainax_limited"] is False

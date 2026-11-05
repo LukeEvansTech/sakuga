@@ -5,7 +5,7 @@
   <dl class="facts">
     <div><dt>Last sweep</dt><dd>{% if last_run %}{{ last_run.status | capitalize }}, {{ last_run.finished | local }}{% else %}None yet{% endif %}</dd></div>
     <div><dt>LLM, last 30 days</dt><dd class="num">{{ spend.n }} calls · ${{ '%.2f' % spend.c }}</dd></div>
-    <div><dt>Schedule</dt><dd>Every 30 min · digest 08:00</dd></div>
+    <div><dt>Schedule</dt><dd>Sweeps <code>{{ schedule }}</code> · digest <code>{{ digest_schedule }}</code> ({{ tz }})</dd></div>
   </dl>
   <form method="post" action="/sweep"><button type="submit" {{ 'disabled' if running }}>{{ 'Sweeping…' if running else 'Sweep now' }}</button></form>
 </section>
@@ -36,11 +36,11 @@
 </table>
 </div>
 {% else %}
-<div class="empty"><p>No sweeps yet. The first runs within 30 minutes of starting, or press Sweep now.</p></div>
+<div class="empty"><p>No sweeps yet. The first runs at the next scheduled time ({{ schedule }}), or press Sweep now.</p></div>
 {% endif %}
 
 <h2 class="rule-head">Digests <span class="n">{{ digests | length }}</span></h2>
 {% if digests %}
 <ul class="digests">{% for d in digests %}<li><span>{{ d.created | local }}</span><span class="num">{{ d.cels }} cel{{ '' if d.cels == 1 else 's' }} · {{ d.result }}</span></li>{% endfor %}</ul>
-{% else %}<div class="empty"><p>No digest sent yet. The first goes at 08:00 if anything new has appeared.</p></div>{% endif %}
+{% else %}<div class="empty"><p>No digest sent yet. It goes on its schedule ({{ digest_schedule }}) once anything new has appeared.</p></div>{% endif %}
 {% endblock %}

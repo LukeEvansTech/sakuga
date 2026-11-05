@@ -101,7 +101,13 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     tpl = Jinja2Templates(directory=HERE / "templates")
     tpl.env.filters.update(yen=yen, gbp=gbp, ago=ago, local=lambda v: local_time(v, s.timezone))
-    tpl.env.globals.update(version=s.version, franchises=FRANCHISES)
+    tpl.env.globals.update(
+        version=s.version,
+        franchises=FRANCHISES,
+        schedule=s.schedule,
+        digest_schedule=s.digest_schedule,
+        tz=s.timezone,
+    )
 
     @app.middleware("http")
     async def same_origin(request: Request, call_next):

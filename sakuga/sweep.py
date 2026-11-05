@@ -409,8 +409,9 @@ def run(
         log.info("sweep already running; skipped")
         return 0
     model = llm or LLM(s.llm_url, s.llm_key, s.llm_model)
-    run_id = db.run("INSERT INTO runs (started, trigger) VALUES (?, ?)", now(), trigger)
+    run_id = 0
     try:
+        run_id = db.run("INSERT INTO runs (started, trigger) VALUES (?, ?)", now(), trigger)
         raws, failed, partial, checked = collect(s, db, run_id, to_check(db))
         row = db.one(
             "SELECT COUNT(*) n FROM run_sources WHERE run_id = ? AND count IS NOT NULL", run_id
