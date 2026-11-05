@@ -3,7 +3,7 @@
 Searched on the UK marketplace, so every price comes back in pounds (converted for sellers
 abroad). eBay's search for a franchise and "cel" spreads over many categories; the cels sit in
 Animation Art (1529) and Other Animation Merchandise (69528), and a search takes one category,
-so each franchise is searched for "cel" and "cell" in each of the two (16 searches a sweep).
+so each search runs in each of the two (20 searches a sweep).
 """
 
 from __future__ import annotations
@@ -18,13 +18,12 @@ from .sources import Raw, Results
 
 API = "https://api.ebay.com"
 CATEGORIES = ("1529", "69528")
-WORDS = ("cel", "cell")
-QUERIES = {
-    "broly": "broly",
-    "fma": "fullmetal alchemist",
-    "eva": "evangelion",
-    "pokemon": "pokemon",
-}
+# Each franchise as "cel" and "cell"; FMA's drawings are wanted too, and their titles may not say cel.
+QUERIES = [
+    f"{name} {word}"
+    for name in ("broly", "fullmetal alchemist", "evangelion", "pokemon")
+    for word in ("cel", "cell")
+] + ["fullmetal alchemist genga", "fullmetal alchemist douga"]
 LIMIT = 200  # the most one page holds
 MAX_PAGES = 5  # every search here fitted one page on 2026-11-05; more than 1,000 is a partial read
 # Without this filter the Browse API returns Buy It Now listings only (checked 2026-11-05).
@@ -58,10 +57,13 @@ class Client:
         self._token, self._expires = d["access_token"], time.time() + int(d["expires_in"])
         return self._token
 
-    def search(self, q: str, category: str, offset: int = 0) -> dict:
-        url = f"{API}/buy/browse/v1/item_summary/search?" + urllib.parse.urlencode(
-            {"q": q, "category_ids": category, "limit": LIMIT, "offset": offset, "filter": BUYING}
+    def search(self, q: str, category: str, next_url: str = "") -> dict:
+        """One page: the first for q in category, or the page at the previous response's next link."""
+        url = next_url or f"{API}/buy/browse/v1/item_summary/search?" + urllib.parse.urlencode(
+            {"q": q, "category_ids": category, "limit": LIMIT, "filter": BUYING}
         )
+        if not url.startswith(f"{API}/"):
+            raise ValueError("next link outside the eBay API")
         req = urllib.request.Request(
             url,
             headers={
@@ -123,13 +125,12 @@ def parse(data: dict) -> Results:
 
 def read(client: Client, q: str, category: str) -> Results:
     """Every page of one search; complete only when all the matches were read."""
-    out, offset = Results(), 0
+    out, next_url = Results(), ""
     for _ in range(MAX_PAGES):
-        data = client.search(q, category, offset)
-        got = parse(data)
-        out += got
-        offset += len(data.get("itemSummaries") or [])
-        if offset >= int(data.get("total", 0)) or not data.get("itemSummaries"):
+        data = client.search(q, category, next_url)
+        out += parse(data)
+        next_url = data.get("next") or ""
+        if not next_url:  # eBay's own word that this was the last page; total is only an estimate
             out.complete = True
             return out
     out.complete = False
@@ -138,16 +139,8 @@ def read(client: Client, q: str, category: str) -> Results:
 
 def jobs(client: Client) -> list:
     """(name, family, fn) per search, in the shape sources.jobs uses; fn ignores the browser page."""
-    out = []
-    for q in QUERIES.values():
-        for word in WORDS:
-            for cat in CATEGORIES:
-                query = f"{q} {word}"
-                out.append(
-                    (
-                        f"ebay:{query}:{cat}",
-                        "eBay",
-                        lambda _page, query=query, cat=cat: read(client, query, cat),
-                    )
-                )
-    return out
+    return [
+        (f"ebay:{q}:{cat}", "eBay", lambda _page, q=q, cat=cat: read(client, q, cat))
+        for q in QUERIES
+        for cat in CATEGORIES
+    ]

@@ -48,7 +48,7 @@ def test_a_cut_off_page_is_partial():
 def test_ebay_runs_only_with_keys():
     assert all(family != "eBay" for _, family, _ in sources.jobs())
     names = [n for n, family, _ in ebay.jobs(ebay.Client("id", "secret"))]
-    assert len(names) == 16 and "ebay:evangelion cel:1529" in names
+    assert len(names) == 20 and "ebay:fullmetal alchemist genga:1529" in names
 
 
 def k(title, yen=None, auction=False):
@@ -108,7 +108,8 @@ class _Pages(ebay.Client):
         super().__init__("id", "secret")
         self.total, self.per_page = total, per_page
 
-    def search(self, q, category, offset=0):
+    def search(self, q, category, next_url=""):
+        offset = int(next_url.rsplit("=", 1)[1]) if next_url else 0
         n = max(0, min(self.per_page, self.total - offset))
         items = [
             {
@@ -118,12 +119,25 @@ class _Pages(ebay.Client):
             }
             for i in range(n)
         ]
-        return {"total": self.total, "itemSummaries": items}
+        page = {"total": self.total, "itemSummaries": items}
+        if offset + n < self.total:
+            page["next"] = f"{ebay.API}/buy/browse/v1/item_summary/search?offset={offset + n}"
+        return page
 
 
-def test_read_follows_pages_and_marks_cut_off_reads():
+def test_read_follows_next_links_and_marks_cut_off_reads():
     got = ebay.read(_Pages(450, 200), "evangelion cel", "1529")
     assert len(got) == 450 and got.complete
     big = ebay.read(_Pages(5000, 200), "pokemon cel", "1529")
     assert len(big) == 1000 and not big.complete
     assert ebay.read(_Pages(0, 200), "broly cell", "69528").complete
+
+
+def test_a_next_link_elsewhere_is_refused():
+    client = ebay.Client("id", "secret")
+    client._get_token = lambda: "t"  # pylint: disable=protected-access
+    try:
+        client.search("q", "1529", "https://example.invalid/steal")
+    except ValueError:
+        return
+    raise AssertionError("followed a next link off the eBay API")

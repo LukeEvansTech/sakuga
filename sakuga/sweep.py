@@ -476,8 +476,8 @@ def retire(
             continue
         if src in READ_WHOLE and src not in partial:
             gone = True
-        elif src == "Mandarake":
-            gone = False  # a truncated shop read proves nothing about what it left out
+        elif src in ("Mandarake", "eBay"):
+            gone = False  # a truncated read proves nothing about what it left out
         elif src == "Mercari":
             verdict = checked.get(r["url"])
             if r["url"] in checked:
