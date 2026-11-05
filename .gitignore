@@ -8,5 +8,6 @@ __pycache__/
 *sync-conflict-*
 .DS_Store
 .impeccable/mocks/
-.impeccable/decision-payload.json
+.impeccable/decision-payload*.json
+.impeccable/brief-body.md
 .impeccable/review/
