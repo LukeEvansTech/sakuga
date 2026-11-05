@@ -31,6 +31,7 @@ uv venv -p 3.13 .venv && uv pip install -p .venv -r requirements.txt -r requirem
 .venv/bin/python -m playwright install chromium
 .venv/bin/python -m pytest -q
 SAKUGA_DATA=data .venv/bin/python -m sakuga sweep --no-notify
+SAKUGA_DATA=data .venv/bin/python -m sakuga digest   # send the digest now; stop the server first
 SAKUGA_DATA=data .venv/bin/python -m sakuga serve   # :8080, sweeps every 30 min, digest 08:00
 ```
 
