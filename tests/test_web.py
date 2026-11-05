@@ -283,7 +283,7 @@ def test_hidden_state_is_derived_from_sightings(env):
 def _fake_collect(rounds):
     """collect() as a sweep sees it: every search recorded as read, and these listings."""
 
-    def collect(s, db, run_id, check=None):
+    def collect(s, db, run_id, _check=None):
         for name, _, _ in sweep.search_jobs(s):
             db.run("INSERT INTO run_sources (run_id, name, count) VALUES (?, ?, 0)", run_id, name)
         return next(rounds), set(), set(), {}
