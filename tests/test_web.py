@@ -246,6 +246,6 @@ def test_relist_of_rejected_artwork_stays_out_when_the_llm_fails(env, monkeypatc
         yen=9000,
     )
     got = sweep.ingest(db, s, _Says(None), [relist], 200.0, False)
-    assert got["new_cels"] == []
+    assert not got["new_cels"]
     row = db.one("SELECT ok, reason FROM listings WHERE id = 'mercari:r1'")
     assert (row["ok"], row["reason"]) == (0, "same photo as rejected yahoo:a2")
