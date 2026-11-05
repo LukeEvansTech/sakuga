@@ -192,7 +192,7 @@ class _Says(LLM):
         super().__init__("", "", "claude")
         self.verdict = verdict
 
-    def classify(self, title, extra, price, image):
+    def classify(self, title, extra, price, photos):
         return self.verdict
 
 
@@ -376,3 +376,86 @@ def test_one_failed_search_does_not_silence_a_source(env, monkeypatch):
     db.run("DELETE FROM kv")
     sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
     assert "Yahoo" in db.get("baselined_sources", [])
+
+
+class _Seen(LLM):
+    """Records the photos each classify call was given."""
+
+    def __init__(self, verdict):
+        super().__init__("", "", "claude")
+        self.verdict, self.calls = verdict, []
+
+    def classify(self, title, extra, price, photos):
+        self.calls.append([p.name for p in photos])
+        return self.verdict
+
+
+def _fake_download(names):
+    def download(url, *a, **k):
+        return (names[url], "0f0f0f0f0f0f0f0f") if url in names else ("", "")
+
+    return download
+
+
+def test_a_new_listing_is_judged_on_its_further_photos(env, monkeypatch):
+    s, db = env
+    names = {"u1": "main.jpg", "u2": "two.jpg", "u3": "seal.jpg"}
+    monkeypatch.setattr(sweep.images, "download", _fake_download(names))
+    raw = Raw(
+        "mercari:m9",
+        "Mercari",
+        "エヴァンゲリオン セル画 碇シンジ",
+        "https://example.invalid/m9",
+        img_url="u1",
+        yen=3500,
+        photos=["u2", "u3", "u4"],  # u4 does not download
+    )
+    llm = _Seen({"kind": "cel", "cel_club": True})
+    sweep.ingest(db, s, llm, [raw], 200.0, False)
+    assert llm.calls == [["main.jpg", "two.jpg", "seal.jpg"]]
+    row = db.one("SELECT ok, reason, photos FROM listings WHERE id = 'mercari:m9'")
+    assert (row["ok"], row["reason"]) == (0, "LLM: Cel Club")
+    assert row["photos"] == '["two.jpg", "seal.jpg"]'
+
+
+def test_a_kept_listing_is_asked_again_once_its_photos_arrive(env, monkeypatch):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg', verdict = '{\"kind\": \"cel\"}'")
+    monkeypatch.setattr(sweep.images, "download", _fake_download({"p2": "seal.jpg"}))
+    again = [
+        Raw("yahoo:a2", "Yahoo", "セル画", "https://example.invalid/x", yen=120000, photos=["p2"]),
+        Raw("yahoo:a1", "Yahoo", "セル画", "https://example.invalid/x", yen=120000, photos=[]),
+        Raw("yahoo:a3", "Yahoo", "セル画", "https://example.invalid/x", yen=120000),  # not gathered
+    ]
+    sweep.ingest(db, s, _Seen(None), again, 200.0, False)
+    got = {r["id"]: (r["photos"], r["recheck"]) for r in db.all("SELECT * FROM listings")}
+    assert got["yahoo:a2"] == ('["seal.jpg"]', 1)
+    assert got["yahoo:a1"] == ("[]", 0)  # nothing more to see: no second call
+    assert got["yahoo:a3"] == (None, 0)  # tried again next sweep
+    llm = _Seen({"kind": "cel", "cel_club": True})
+    assert sweep.backfill(db, llm, s) == 1
+    assert llm.calls == [["a.jpg", "seal.jpg"]]
+    row = db.one("SELECT ok, recheck FROM listings WHERE id = 'yahoo:a2'")
+    assert (row["ok"], row["recheck"]) == (0, 0)
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 1
+    assert sweep.backfill(db, llm, s) == 0  # asked once
+
+
+def test_photos_are_gathered_only_for_listings_the_llm_will_read(env):
+    _, db = env
+    db.run("UPDATE listings SET photos = '[]' WHERE id = 'yahoo:a1'")
+
+    class Page:
+        opened: list = []
+
+    raws = [
+        Raw("mercari:m77", "Mercari", "エヴァンゲリオン セル画", "https://x.invalid", yen=9000),
+        Raw("mercari:m78", "Mercari", "エヴァンゲリオン ポスター", "https://x.invalid", yen=9000),
+        Raw("yahoo:a1", "Yahoo", "セル画", "https://x.invalid"),  # photos already stored
+        Raw("mercari:m3", "Mercari", "セル画", "https://x.invalid"),  # kept, never gathered
+    ]
+    sweep.gather_photos(Page(), db, raws)
+    got = {r.id: r.photos for r in raws}
+    assert got["mercari:m77"][0].endswith("/m77_2.jpg") and len(got["mercari:m77"]) == 2
+    assert got["mercari:m78"] is None and got["yahoo:a1"] is None
+    assert got["mercari:m3"][1].endswith("/m3_3.jpg")

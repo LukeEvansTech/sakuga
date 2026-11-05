@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
 
-from .sources import Raw, Results
+from .sources import MORE_PHOTOS, Raw, Results
 
 API = "https://api.ebay.com"
 CATEGORIES = ("1529", "69528")
@@ -84,6 +85,12 @@ def _gbp(price: dict | None) -> float | None:
         return None
 
 
+def _more(it: dict) -> list[str]:
+    """The listing's further photos, at a size the LLM can read a seal on (the API gives 225px)."""
+    urls = [i.get("imageUrl", "") for i in it.get("additionalImages") or []]
+    return [re.sub(r"/s-l\d+\.", "/s-l800.", u) for u in urls if u][:MORE_PHOTOS]
+
+
 def parse(data: dict) -> Results:
     """One search response as listings; complete when the page held every match."""
     out = Results()
@@ -119,6 +126,7 @@ def parse(data: dict) -> Results:
                 # Not a cel category: eBay's "cell" search brings phones and CDs, so the title must say it.
                 cel_category=False,
                 lang="en",
+                photos=_more(it),
             )
         )
     out.complete = int(data.get("total", 0)) <= len(items)

@@ -153,3 +153,22 @@ def test_a_next_link_elsewhere_is_refused():
     except ValueError:
         return
     raise AssertionError("followed a next link off the eBay API")
+
+
+def test_further_photos_come_at_a_readable_size():
+    item = {
+        "itemId": "v1|287597425182|0",
+        "title": "Evangelion production cel",
+        "itemWebUrl": "https://www.ebay.co.uk/itm/287597425182",
+        "price": {"value": "100.00", "currency": "GBP"},
+        "additionalImages": [
+            {"imageUrl": f"https://i.ebayimg.com/images/g/x{n}/s-l225.jpg"} for n in range(4)
+        ],
+    }
+    (raw,) = ebay.parse({"itemSummaries": [item], "total": 1})
+    assert raw.photos == [
+        "https://i.ebayimg.com/images/g/x0/s-l800.jpg",
+        "https://i.ebayimg.com/images/g/x1/s-l800.jpg",
+    ]
+    (bare,) = ebay.parse({"itemSummaries": [{**item, "additionalImages": []}], "total": 1})
+    assert bare.photos == []

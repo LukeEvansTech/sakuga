@@ -73,12 +73,13 @@ def store(raw: bytes, img_dir: Path) -> tuple[str, str]:
     return name, h
 
 
-def download(url: str, img_dir: Path, referer: str = "") -> tuple[str, str]:
-    """(file, phash), or ('', '') when the photo cannot be fetched: the listing is kept either way."""
+def download(url: str, img_dir: Path, referer: str = "", quiet: bool = False) -> tuple[str, str]:
+    """(file, phash), or ('', '') when the photo cannot be fetched: the listing is kept either way.
+    quiet for guessed URLs (Mercari's photo 3), where a missing photo is expected."""
     if not url:
         return "", ""
     try:
         return store(fetch(url, referer), img_dir)
     except Exception as e:  # pylint: disable=broad-exception-caught
-        log.warning("image %s: %s", url[:120], type(e).__name__)
+        (log.debug if quiet else log.warning)("image %s: %s", url[:120], type(e).__name__)
         return "", ""
