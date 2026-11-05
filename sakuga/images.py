@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -82,3 +83,18 @@ def download(url: str, img_dir: Path, referer: str = "") -> tuple[str, str]:
     except Exception as e:  # pylint: disable=broad-exception-caught
         log.warning("image %s: %s", url[:120], type(e).__name__)
         return "", ""
+
+
+def download_more(url: str, img_dir: Path, referer: str = "", guessed: bool = False) -> str | None:
+    """A further photo's file; '' when the site says there is no such photo, None when it could not
+    be fetched this time (worth another try). A guessed URL (Mercari's photo 3) answers 403 when
+    the listing has fewer photos; elsewhere a 403 may be a passing block, so it is tried again."""
+    try:
+        return store(fetch(url, referer), img_dir)[0]
+    except urllib.error.HTTPError as e:
+        if e.code in (404, 410) or (guessed and e.code == 403):
+            return ""
+        log.warning("image %s: HTTP %s", url[:120], e.code)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        log.warning("image %s: %s", url[:120], type(e).__name__)
+    return None

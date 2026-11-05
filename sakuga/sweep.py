@@ -17,7 +17,7 @@ from . import catalog, ebay, filters, images, notify
 from .config import Settings
 from .db import DB
 from .llm import LLM
-from .sources import UA, Raw, jobs, mercari_available
+from .sources import UA, Raw, jobs, mercari_available, more_photos
 
 log = logging.getLogger(__name__)
 LOCK = threading.Lock()
@@ -84,6 +84,7 @@ def collect(
                     err or None,
                     round(time.monotonic() - started, 1),
                 )
+            gather_photos(page, db, raws)
             for url in check or []:
                 try:
                     checked[url] = mercari_available(page, url)
@@ -132,6 +133,56 @@ FIRST_SOURCES = ("Yahoo", "Mercari", "Mandarake", "Mandarake auction")
 ALL_SOURCES = (*FIRST_SOURCES, "eBay")
 
 
+MAX_PHOTO_PAGES = 40  # item pages opened per sweep for photos (Yahoo); the rest wait a sweep
+
+
+def gather_photos(page, db: DB, raws: list[Raw]) -> None:
+    """Find the further photos of each listing the LLM will read: a new one past the title filter,
+    or a kept one whose further photos are not all stored yet. raw.photos stays None where unknown.
+    """
+    # (last tried, listing): new ones first, then the longest waiting
+    todo: list[tuple[str, Raw]] = []
+    done: set[str] = set()
+    for raw in raws:
+        raw.photos = raw.photos if raw.source == "eBay" else None
+        if raw.id in done:
+            continue
+        done.add(raw.id)
+        old = db.one("SELECT ok, photos_done, photos_tried FROM listings WHERE id = ?", raw.id)
+        if old:
+            if old["ok"] and not old["photos_done"]:
+                todo.append((old["photos_tried"] or "0", raw))
+        elif filters.classify(
+            raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction, raw.lang == "en"
+        ):
+            todo.append(("", raw))
+    pages = 0
+    for _, raw in sorted(todo, key=lambda x: x[0]):
+        if raw.source == "Yahoo":
+            if pages >= MAX_PHOTO_PAGES:
+                continue
+            pages += 1
+            db.run("UPDATE listings SET photos_tried = ? WHERE id = ?", now(), raw.id)
+        try:
+            raw.photos = more_photos(page, raw)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            log.warning("photos for %s: %s", raw.id, type(e).__name__)
+            raw.photos = None
+
+
+def _download_more(raw: Raw, img_dir: Path) -> tuple[list[str], bool]:
+    """Store the listing's further photos: the files that arrived, and whether every one was
+    settled (fetched, or gone for good). An unsettled set is fetched again on a later sweep."""
+    out, settled = [], raw.photos is not None
+    for url in raw.photos or []:
+        name = images.download_more(url, img_dir, referer=raw.url, guessed=raw.source == "Mercari")
+        if name is None:
+            settled = False
+        elif name and name not in out:
+            out.append(name)
+    return out, settled
+
+
 def ingest(
     db: DB,
     s: Settings,
@@ -150,7 +201,9 @@ def ingest(
             continue
         yen = raw.yen or (round(raw.gbp * rate) if raw.gbp and rate else None)
         gbp = raw.gbp or (raw.yen / rate if raw.yen and rate else None)
-        old = db.one("SELECT ok, cel_id, yen, image FROM listings WHERE id = ?", raw.id)
+        old = db.one(
+            "SELECT ok, cel_id, yen, image, photos, photos_done FROM listings WHERE id = ?", raw.id
+        )
         if (
             old
         ):  # already catalogued: the admission filters (a price cut below the floor) do not apply
@@ -182,6 +235,20 @@ def ingest(
                             old["cel_id"],
                         )
                         regroup(db, llm, s, raw, old["cel_id"], image, ph)
+            if old["ok"] and not old["photos_done"] and raw.photos is not None:
+                more, settled = _download_more(raw, s.img_dir)
+                had = json.loads(old["photos"] or "[]")
+                new = [f for f in more if f not in had]
+                # The LLM judged it without these photos: ask again with them (a Cel Club seal).
+                # The ones still missing are fetched again next sweep, and asked about when they come.
+                db.run(
+                    "UPDATE listings SET photos=?, photos_done=?,"
+                    " recheck = CASE WHEN ? THEN 1 ELSE recheck END WHERE id=?",
+                    json.dumps(had + new),
+                    int(settled),
+                    int(bool(new)),
+                    raw.id,
+                )
             if old["ok"] and old["cel_id"]:
                 kept += 1
                 db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, old["cel_id"])
@@ -195,8 +262,13 @@ def ingest(
             continue
         seen.add(raw.id)
         image, ph = images.download(raw.img_url, s.img_dir, referer=raw.url)
+        more, settled = _download_more(raw, s.img_dir)
         verdict = llm.classify(
-            raw.title, raw.extra, price_text(yen, gbp), s.img_dir / image if image else None
+            raw.title,
+            raw.extra,
+            price_text(yen, gbp),
+            # Never the further photos alone: a douga beside a cel would read as the listing.
+            [s.img_dir / f for f in [image, *more]] if image else [],
         )
         k = catalog.keep(c["franchise"], c["kind"], verdict)
         if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
@@ -248,8 +320,8 @@ def ingest(
                     )
         db.run(
             "INSERT INTO listings (id, source, cel_id, title, extra, url, img_url, image, phash, yen, gbp,"
-            " info, auction, franchise, kind, verdict, ok, reason, first_seen, last_seen)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " info, auction, franchise, kind, verdict, ok, reason, first_seen, last_seen, photos,"
+            " photos_done, recheck) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             raw.id,
             raw.source,
             cel_id,
@@ -270,6 +342,11 @@ def ingest(
             k.reason,
             t,
             t,
+            json.dumps(more),
+            int(settled),  # 0: the rest are fetched again later, and the LLM asked again
+            int(
+                bool(more) and not image
+            ),  # withheld for want of the main photo: asked once it comes
         )
         if yen:
             db.run(
@@ -309,15 +386,17 @@ MAX_BACKFILL = 10
 
 
 def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
-    """Ask the LLM again about kept listings it never answered for (a timeout, a cut-off reply).
+    """Ask the LLM again about kept listings it never answered for (a timeout, a cut-off reply),
+    or whose further photos arrived after its verdict.
 
     The verdict counts as it would have on first sight: a Cel Club cel, print or drawing leaves the
     catalogue (its cel is hidden if nothing else holds it), and kind and GAINAX follow the LLM. Returns the number answered.
     """
     rows = db.all(
-        "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.franchise, l.cel_id, c.gainax"
-        " FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
-        " WHERE l.ok = 1 AND l.verdict = '' AND l.image != ''"  # sold ones too: they hold a cel visible
+        "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id,"
+        " c.gainax FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
+        " WHERE l.ok = 1 AND (l.verdict = '' OR l.recheck = 1)"
+        " AND l.image != ''"  # sold ones too: they hold a cel visible
         # Never asked first, newest first; then the longest since the last try, so failures rotate.
         " ORDER BY l.asked IS NOT NULL, l.asked, l.first_seen DESC LIMIT ?",
         limit,
@@ -325,8 +404,12 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
     answered = 0
     for r in rows:
         db.run("UPDATE listings SET asked = ? WHERE id = ?", now(), r["id"])
+        more = json.loads(r["photos"]) if r["photos"] else []
         verdict = llm.classify(
-            r["title"], r["extra"], price_text(r["yen"], r["gbp"]), s.img_dir / r["image"]
+            r["title"],
+            r["extra"],
+            price_text(r["yen"], r["gbp"]),
+            [s.img_dir / f for f in [r["image"], *more]],
         )
         if not verdict:
             continue
@@ -336,7 +419,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
         with NOTIFY_LOCK, db.tx() as con:
             if not k.ok:
                 con.execute(
-                    "UPDATE listings SET verdict=?, ok=0, reason=?, kind=? WHERE id=?",
+                    "UPDATE listings SET verdict=?, ok=0, reason=?, kind=?, recheck=0 WHERE id=?",
                     (_json(verdict), k.reason, k.kind, r["id"]),
                 )
                 # Hidden, not deleted: its id stays out of reuse (alert links), and relists still match it.
@@ -348,7 +431,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
                 log.info("listing %s dropped on a second look: %s", r["id"], k.reason)
                 continue
             con.execute(
-                "UPDATE listings SET verdict=?, kind=? WHERE id=?",
+                "UPDATE listings SET verdict=?, kind=?, recheck=0 WHERE id=?",
                 (_json(verdict), k.kind, r["id"]),
             )
             con.execute(

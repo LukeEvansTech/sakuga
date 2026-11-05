@@ -192,7 +192,7 @@ class _Says(LLM):
         super().__init__("", "", "claude")
         self.verdict = verdict
 
-    def classify(self, title, extra, price, image):
+    def classify(self, title, extra, price, photos):
         return self.verdict
 
 
@@ -376,3 +376,140 @@ def test_one_failed_search_does_not_silence_a_source(env, monkeypatch):
     db.run("DELETE FROM kv")
     sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
     assert "Yahoo" in db.get("baselined_sources", [])
+
+
+class _Seen(LLM):
+    """Records the photos each classify call was given."""
+
+    def __init__(self, verdict):
+        super().__init__("", "", "claude")
+        self.verdict, self.calls = verdict, []
+
+    def classify(self, title, extra, price, photos):
+        self.calls.append([p.name for p in photos])
+        return self.verdict
+
+
+def _fake_photos(monkeypatch, names):
+    """Photos by URL: a name downloads, '' is gone for good, None fails this time."""
+    monkeypatch.setattr(
+        sweep.images, "download", lambda url, *_a, **_k: (names.get(url) or "", "0f0f0f0f0f0f0f0f")
+    )
+    monkeypatch.setattr(sweep.images, "download_more", lambda url, *_a, **_k: names.get(url, ""))
+
+
+def test_a_new_listing_is_judged_on_its_further_photos(env, monkeypatch):
+    s, db = env
+    _fake_photos(monkeypatch, {"u1": "main.jpg", "u2": "two.jpg", "u3": "seal.jpg"})
+    raw = Raw(
+        "mercari:m9",
+        "Mercari",
+        "エヴァンゲリオン セル画 碇シンジ",
+        "https://example.invalid/m9",
+        img_url="u1",
+        yen=3500,
+        photos=["u2", "u3", "u4"],  # u4 does not download
+    )
+    llm = _Seen({"kind": "cel", "cel_club": True})
+    sweep.ingest(db, s, llm, [raw], 200.0, False)
+    assert llm.calls == [["main.jpg", "two.jpg", "seal.jpg"]]
+    row = db.one("SELECT ok, reason, photos FROM listings WHERE id = 'mercari:m9'")
+    assert (row["ok"], row["reason"]) == (0, "LLM: Cel Club")
+    assert row["photos"] == '["two.jpg", "seal.jpg"]'
+
+
+def test_a_kept_listing_is_asked_again_once_its_photos_arrive(env, monkeypatch):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg', verdict = '{\"kind\": \"cel\"}'")
+    _fake_photos(monkeypatch, {"p2": "seal.jpg", "p4": None})
+    db.run(
+        "INSERT INTO listings (id, source, cel_id, title, url, franchise, kind, first_seen, last_seen,"
+        " image) VALUES ('yahoo:a4', 'Yahoo', 3, 'セル画', 'https://x.invalid', 'eva', 'cel', ?, ?, '')",
+        T,
+        T,
+    )
+    again = [
+        Raw("yahoo:a4", "Yahoo", "セル画", "https://example.invalid/x", photos=["p2", "p4"]),
+        Raw("yahoo:a2", "Yahoo", "セル画", "https://example.invalid/x", yen=120000, photos=["p2"]),
+        Raw("yahoo:a1", "Yahoo", "セル画", "https://example.invalid/x", yen=120000, photos=[]),
+        Raw("yahoo:a3", "Yahoo", "セル画", "https://example.invalid/x", yen=120000),  # not gathered
+    ]
+    sweep.ingest(db, s, _Seen(None), again, 200.0, False)
+    rows = db.all("SELECT id, photos, recheck, photos_done FROM listings")
+    got = {r["id"]: (r["photos"], r["recheck"], r["photos_done"]) for r in rows}
+    assert got["yahoo:a2"] == ('["seal.jpg"]', 1, 1)
+    assert got["yahoo:a1"] == ("[]", 0, 1)  # nothing more to see: no second call
+    assert got["yahoo:a3"] == (None, 0, 0)  # gathered next sweep
+    assert got["yahoo:a4"] == ('["seal.jpg"]', 1, 0)  # seen now; p4 failed and is fetched again
+    _fake_photos(monkeypatch, {"p2": "seal.jpg", "p4": "back.jpg"})
+    sweep.ingest(db, s, _Seen(None), again[:1], 200.0, False)
+    row = db.one("SELECT photos, photos_done FROM listings WHERE id = 'yahoo:a4'")
+    assert (row["photos"], row["photos_done"]) == ('["seal.jpg", "back.jpg"]', 1)
+    llm = _Seen({"kind": "cel", "cel_club": True})
+    assert sweep.backfill(db, llm, s) == 1  # yahoo:a4 waits for its main photo
+    assert llm.calls == [["a.jpg", "seal.jpg"]]
+    row = db.one("SELECT ok, recheck FROM listings WHERE id = 'yahoo:a2'")
+    assert (row["ok"], row["recheck"]) == (0, 0)
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 1
+    assert sweep.backfill(db, llm, s) == 0  # asked once
+
+
+def test_photos_are_gathered_only_for_listings_the_llm_will_read(env):
+    _, db = env
+    db.run("UPDATE listings SET photos = '[]' WHERE id = 'yahoo:a1'")
+
+    class Page:
+        opened: list = []
+
+    raws = [
+        Raw("mercari:m77", "Mercari", "エヴァンゲリオン セル画", "https://x.invalid", yen=9000),
+        Raw("mercari:m78", "Mercari", "エヴァンゲリオン ポスター", "https://x.invalid", yen=9000),
+        Raw("yahoo:a1", "Yahoo", "セル画", "https://x.invalid"),  # photos already stored
+        Raw("mercari:m3", "Mercari", "セル画", "https://x.invalid"),  # kept, never gathered
+    ]
+    sweep.gather_photos(Page(), db, raws)
+    got = {r.id: r.photos for r in raws}
+    assert got["mercari:m77"][0].endswith("/m77_2.jpg") and len(got["mercari:m77"]) == 2
+    assert got["mercari:m78"] is None and got["yahoo:a1"] is None
+    assert got["mercari:m3"][1].endswith("/m3_3.jpg")
+
+
+def test_item_pages_go_to_new_listings_then_the_longest_waiting(env, monkeypatch):
+    _, db = env
+    monkeypatch.setattr(sweep, "MAX_PHOTO_PAGES", 2)
+    opened = []
+    monkeypatch.setattr(sweep, "more_photos", lambda _p, raw: opened.append(raw.id) or [])
+    db.run("UPDATE listings SET photos_tried = '2026-01-02 00:00:00' WHERE id = 'yahoo:a1'")
+    db.run("UPDATE listings SET photos_tried = '2026-01-01 00:00:00' WHERE id = 'yahoo:a2'")
+    raws = [
+        Raw("yahoo:a1", "Yahoo", "セル画", "https://x.invalid"),
+        Raw("yahoo:a2", "Yahoo", "セル画", "https://x.invalid"),
+        Raw("yahoo:new", "Yahoo", "エヴァンゲリオン セル画", "https://x.invalid", yen=9000),
+    ]
+    sweep.gather_photos(None, db, raws)
+    assert opened == ["yahoo:new", "yahoo:a2"]  # yahoo:a1 had its turn most recently
+    tried = db.one("SELECT photos_tried FROM listings WHERE id = 'yahoo:a2'")["photos_tried"]
+    assert tried > "2026-01-01 00:00:00"
+
+
+def test_further_photos_wait_for_the_main_one(env, monkeypatch):
+    s, db = env
+    _fake_photos(monkeypatch, {"u2": "seal.jpg"})  # the main photo u1 fails
+    raw = Raw(
+        "mercari:m10",
+        "Mercari",
+        "エヴァンゲリオン セル画 碇シンジ",
+        "https://example.invalid/m10",
+        img_url="u1",
+        yen=3500,
+        photos=["u2"],
+    )
+    llm = _Seen({"kind": "cel"})
+    sweep.ingest(db, s, llm, [raw], 200.0, False)
+    assert llm.calls == [[]]  # not the seal alone
+    assert db.one("SELECT recheck FROM listings WHERE id = 'mercari:m10'")["recheck"] == 1
+    assert sweep.backfill(db, llm, s) == 0  # waits for the main photo
+    _fake_photos(monkeypatch, {"u1": "main.jpg", "u2": "seal.jpg"})
+    sweep.ingest(db, s, llm, [raw], 200.0, False)  # the main photo arrives
+    sweep.backfill(db, llm, s)
+    assert ["main.jpg", "seal.jpg"] in llm.calls

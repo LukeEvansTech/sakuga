@@ -92,10 +92,10 @@ def test_llm_answers_are_type_checked(monkeypatch, tmp_path):
     monkeypatch.setattr(
         m, "_ask", lambda *a, **k: {"kind": "cel", "title_en": None, "characters": "Rei"}
     )
-    v = m.classify("t", "", "", None)
+    v = m.classify("t", "", "", [])
     assert v and v["title_en"] == "" and v["characters"] == [] and v["gainax_limited"] is False
     monkeypatch.setattr(m, "_ask", lambda *a, **k: {"kind": ["cel"]})
-    assert m.classify("t", "", "", None) is None
+    assert m.classify("t", "", "", []) is None
 
 
 def test_scheduler_waits_across_the_autumn_clock_change():

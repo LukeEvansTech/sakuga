@@ -19,7 +19,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 CLASSIFY = """You catalogue Japanese anime production art for a collector. Read this marketplace listing
-(Japanese title, an optional machine translation, and the main photo) and answer in JSON only:
+(Japanese title, an optional machine translation, and up to three photos, the main one first) and answer in JSON only:
 
 {"kind": "cel" | "genga" | "douga" | "reproduction" | "print" | "not_art",
  "gainax_limited": true|false,
@@ -37,11 +37,12 @@ Definitions:
 - reproduction: a 複製セル or replica, including official limited reproductions.
 - gainax_limited: an official GAINAX numbered limited reproduction cel (e.g. 限定100部, No.04/100).
 - print: printed cels, Cel Club (セル画倶楽部), prize cels, cards, posters, art books.
-- cel_club: true if the words or the photo show it is a Cel Club cel (セル画倶楽部, セル画俱楽部,
-  セル画クラブ, CEL CLUB), in any spelling. A Cel Club cel is never gainax_limited.
+- cel_club: true if the words or any photo show it is a Cel Club cel (セル画倶楽部, セル倶楽部,
+  セル画クラブ, CEL CLUB, CELLU CLUB), in any spelling, such as a seal, stamp or certificate in a later photo.
+  A Cel Club cel is never gainax_limited.
 - not_art: figures, books, goods, anything else.
 - broly is Dragon Ball's Broly (ブロリー) only; other Dragon Ball characters are "other".
-Judge from the photo as well as the words: a glossy printed card or a book page is not a cel.
+Judge from the photos as well as the words: a glossy printed card or a book page is not a cel.
 
 Title: {title}
 Translation: {extra}
@@ -115,14 +116,13 @@ class LLM:
             return None
         return _parse(text)
 
-    def classify(self, title: str, extra: str, price: str, image: Path | None) -> dict | None:
+    def classify(self, title: str, extra: str, price: str, photos: list[Path]) -> dict | None:
         if not self.on:
             return None
         prompt = CLASSIFY.replace("{title}", title[:400]).replace("{extra}", extra[:400])
         prompt = prompt.replace("{price}", price)
         content: list[dict] = [{"type": "text", "text": prompt}]
-        if image and image.exists():
-            content.append(_image_part(image))
+        content += [_image_part(p) for p in photos if p.exists()]
         v = self._ask(content)
         if (
             not v

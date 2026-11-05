@@ -69,6 +69,7 @@ class Raw:
     auction: bool = False
     cel_category: bool = False
     lang: str = "ja"  # "en" where the title is English (eBay)
+    photos: list[str] | None = None  # the listing's further photos; None until gathered
     meta: dict = field(default_factory=dict)
 
 
@@ -266,6 +267,32 @@ def mercari_available(page, url: str) -> bool | None:
     if "See more items" in text or "売り切れ" in text:
         return False
     return None
+
+
+MORE_PHOTOS = 2  # photos beyond the main one that the LLM sees: a Cel Club seal is rarely the first
+
+
+def more_photos(page, raw: Raw) -> list[str] | None:
+    """URLs of the listing's photos after the main one (at most MORE_PHOTOS), or None when the item
+    page did not say. Mandarake answers [] (its main photo only)."""
+    if raw.source == "eBay":
+        return raw.photos  # in the search results already
+    if raw.source == "Mercari":
+        m = re.fullmatch(r"mercari:(m\d+)", raw.id)  # Mercari Shops items use other photo URLs
+        if not m:
+            return []
+        base = "https://static.mercdn.net/item/detail/orig/photos/"
+        return [f"{base}{m.group(1)}_{n}.jpg" for n in range(2, 2 + MORE_PHOTOS)]
+    if raw.source == "Yahoo":  # Yahoo refuses UK visitors; Buyee's item page shows the gallery
+        page.goto(raw.url, wait_until="domcontentloaded", timeout=60000)
+        try:
+            page.wait_for_selector("a.js-smartPhoto", timeout=15000)
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+        urls = page.eval_on_selector_all("a.js-smartPhoto", "els => els.map(a => a.href)")
+        seen = list(dict.fromkeys(u for u in urls if u))
+        return seen[1 : 1 + MORE_PHOTOS]  # the first is the main photo
+    return []
 
 
 Job = tuple[str, str, Callable]  # (name, family, fn(page) -> list[Raw])
