@@ -83,16 +83,17 @@ def _load(page, url: str, wait_sel: str, settle: int = 2500, required: bool = Tr
     page.wait_for_timeout(settle)
 
 
-def _scroll_until_stable(page, sel: str, rounds: int = 12) -> None:
-    """Mercari renders 120 cards but fills in their links only once scrolled into view."""
-    last = -1
+def _scroll_to_bottom(page, rounds: int = 60) -> None:
+    """Mercari renders 120 cards but fills in their links only once scrolled into view, so scroll
+    one viewport at a time (a bigger jump skips cards) until the bottom, then let them settle."""
+    step = int(page.viewport_size["height"] * 0.8) if page.viewport_size else 700
     for _ in range(rounds):
-        n = page.evaluate(f"() => document.querySelectorAll({sel!r}).length")
-        if n == last:
+        at_bottom = page.evaluate("() => innerHeight + scrollY >= document.body.scrollHeight - 2")
+        if at_bottom:
             break
-        last = n
-        page.mouse.wheel(0, 3000)
-        page.wait_for_timeout(700)
+        page.mouse.wheel(0, step)
+        page.wait_for_timeout(250)
+    page.wait_for_timeout(800)
 
 
 def buyee(page, q: str) -> list[Raw]:
@@ -105,7 +106,7 @@ def buyee(page, q: str) -> list[Raw]:
         raise RuntimeError(f"not a Buyee page: {page.title()[:80]!r}")
     rows = page.evaluate("""() => [...document.querySelectorAll('li.itemCard')].map(li => {
       const a = li.querySelector('.itemCard__itemName a'); const img = li.querySelector('img');
-      return {href: a && a.href, jp: img ? img.getAttribute('alt') : '', en: a ? a.innerText.trim() : '',
+      return {href: a && a.href, jp: img ? (img.getAttribute('alt') || '') : '', en: a ? a.innerText.trim() : '',
               img: img ? (img.getAttribute('data-src') || img.src || '') : '',
               price: (li.querySelector('.g-price')||{}).textContent || '',
               fx: (li.querySelector('.g-priceFx')||{}).textContent || '',
@@ -143,7 +144,7 @@ def mercari(page, q: str) -> list[Raw]:
         "&status=on_sale&sort=created_time&order=desc"
     )
     _load(page, url, 'li[data-testid="item-cell"]')
-    _scroll_until_stable(page, 'li[data-testid="item-cell"] a[href*="/item/"]')
+    _scroll_to_bottom(page)
     rows = page.evaluate("""() => [...document.querySelectorAll('li[data-testid="item-cell"]')]
       .map(li => { const a = li.querySelector('a'); const img = li.querySelector('img');
         return {href: a && a.href, text: li.innerText, alt: img ? (img.getAttribute('alt') || '') : '',
