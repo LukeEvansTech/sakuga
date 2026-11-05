@@ -271,7 +271,7 @@ def mercari_available(page, url: str) -> bool | None:
 Job = tuple[str, str, Callable]  # (name, family, fn(page) -> list[Raw])
 
 
-def jobs(ebay_client=None) -> list[Job]:
+def jobs() -> list[Job]:
     """Every search one sweep runs. The family groups a site's searches for deactivation."""
     out: list[Job] = []
     for f in FRANCHISES.values():
@@ -282,8 +282,4 @@ def jobs(ebay_client=None) -> list[Job]:
             out.append((f"mercari:{q}", "Mercari", lambda p, q=q: mercari(p, q)))
     out.append(("mandarake-shop", "Mandarake", mandarake_shop))
     out.append(("mandarake-auction", "Mandarake auction", mandarake_auction))
-    if ebay_client:
-        from . import ebay  # pylint: disable=import-outside-toplevel  # ebay imports this module
-
-        out += ebay.jobs(ebay_client)
     return out

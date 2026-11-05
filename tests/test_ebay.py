@@ -47,7 +47,7 @@ def test_a_cut_off_page_is_partial():
 
 def test_ebay_runs_only_with_keys():
     assert all(family != "eBay" for _, family, _ in sources.jobs())
-    names = [n for n, family, _ in sources.jobs(ebay.Client("id", "secret")) if family == "eBay"]
+    names = [n for n, family, _ in ebay.jobs(ebay.Client("id", "secret"))]
     assert len(names) == 16 and "ebay:evangelion cel:1529" in names
 
 

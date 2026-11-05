@@ -53,7 +53,7 @@ def collect(
                 if s.ebay_client_id and s.ebay_client_secret
                 else None
             )
-            for name, family, fn in jobs(client):
+            for name, family, fn in jobs() + (ebay.jobs(client) if client else []):
                 started, got, err = time.monotonic(), None, ""
                 for attempt in range(1, s.tries + 1):
                     try:
