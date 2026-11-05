@@ -91,6 +91,8 @@ def parse(data: dict) -> Results:
     for it in items:
         parts = str(it.get("itemId", "")).split("|")
         legacy = parts[1] if len(parts) > 1 else it.get("legacyItemId", "")
+        # v1|<listing>|<variation>: variations of one listing can be different cels.
+        variation = parts[2] if len(parts) > 2 and parts[2] != "0" else ""
         if not legacy or not it.get("title") or not it.get("itemWebUrl"):
             continue
         options = it.get("buyingOptions") or []
@@ -106,10 +108,10 @@ def parse(data: dict) -> Results:
             info = "Buy it now" + (" · offers" if "BEST_OFFER" in options else "")
         out.append(
             Raw(
-                id=f"ebay:{legacy}",
+                id=f"ebay:{legacy}" + (f"-{variation}" if variation else ""),
                 source="eBay",
                 title=it["title"],
-                url=it["itemWebUrl"].split("?")[0],
+                url=it["itemWebUrl"] if variation else it["itemWebUrl"].split("?")[0],
                 img_url=(it.get("image") or {}).get("imageUrl", ""),
                 gbp=gbp,
                 info=f"{info} · from {where}" if where else info,

@@ -41,6 +41,18 @@ def test_parse_reads_ids_prices_and_auctions():
     assert (auction.gbp, auction.auction, auction.info) == (40.0, True, "Auction · 1 bid · from JP")
 
 
+def test_variations_stay_distinct():
+    item = {"title": "Evangelion cel", "itemWebUrl": "https://www.ebay.co.uk/itm/5?var=111"}
+    got = ebay.parse(
+        {
+            "total": 2,
+            "itemSummaries": [{**item, "itemId": "v1|5|111"}, {**item, "itemId": "v1|5|222"}],
+        }
+    )
+    assert [r.id for r in got] == ["ebay:5-111", "ebay:5-222"]
+    assert got[0].url.endswith("?var=111")
+
+
 def test_a_cut_off_page_is_partial():
     assert not ebay.parse({**RESPONSE, "total": 500}).complete
 

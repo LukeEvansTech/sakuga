@@ -84,7 +84,7 @@ GAINAX_LIMITED = re.compile(
 )
 # A reproduction cel in the title's own words: Japanese, or how eBay sellers write it in English.
 REPRO_CEL = re.compile(
-    r"複製セル|(?:reproduction|repro\.?|replica)\s+(?:animation\s+|anime\s+)?cels?\b", re.I
+    r"複製セル|(?:reproduction|repro\.?|replica)\s+(?:animation\s+|anime\s+)?cell?s?\b", re.I
 )
 
 
