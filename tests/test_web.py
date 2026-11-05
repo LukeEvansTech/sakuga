@@ -142,6 +142,7 @@ def test_instant_alert_retries_and_skips_digest(env, monkeypatch):
     monkeypatch.setattr(notify, "send", lambda *a, **k: "sent")
     assert sweep.instant(db, s) == ["cel 2: sent"]  # retried on the next sweep
     assert [c["id"] for c in sweep.pending(db)] == [3]  # announced once, not again in the digest
+    assert {c["id"] for c in sweep.new_since_digest(db)} == {2, 3}  # still on Today
     assert not sweep.instant(db, s)
 
 
@@ -173,3 +174,12 @@ def test_pound_prices_meet_the_minimum(env):
     cheap = Raw("mercari:x1", "Mercari", "ポケモン セル画", "https://example.invalid/x", gbp=5.0)
     got = sweep.ingest(db, s, LLM("", "", "claude"), [cheap], 200.0, False)
     assert got["seen"] == set()  # ¥1,000 is under the ¥3,000 fixed-price floor
+
+
+def test_known_listing_cut_below_the_floor_stays(env):
+    s, db = env
+    db.run("UPDATE listings SET source = 'Mandarake' WHERE id = 'yahoo:a2'")
+    cut = Raw("yahoo:a2", "Mandarake", "ポケモン セル画", "https://example.invalid/x", yen=2500)
+    got = sweep.ingest(db, s, LLM("", "", "claude"), [cut], 200.0, False)
+    assert got["seen"] == {"yahoo:a2"}
+    assert db.one("SELECT yen FROM listings WHERE id = 'yahoo:a2'")["yen"] == 2500

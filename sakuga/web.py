@@ -132,7 +132,7 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
 
     @app.get("/today", response_class=HTMLResponse)
     def today(request: Request):
-        fresh = [cel_view(db, r) for r in sweep.pending(db)]
+        fresh = [cel_view(db, r) for r in sweep.new_since_digest(db)]
         last = db.one("SELECT * FROM digests ORDER BY id DESC LIMIT 1")
         sent = []
         if last:

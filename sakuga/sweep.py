@@ -129,14 +129,12 @@ def ingest(
         if raw.id in seen:
             continue
         yen = raw.yen or (round(raw.gbp * rate) if raw.gbp and rate else None)
-        # Converted first, so the minimum price applies to Mercari's pound-only prices too.
-        c = filters.classify(raw.title, raw.extra, yen, raw.cel_category, raw.auction)
-        if not c:
-            continue
-        seen.add(raw.id)
         gbp = raw.gbp or (raw.yen / rate if raw.yen and rate else None)
         old = db.one("SELECT ok, cel_id, yen, image FROM listings WHERE id = ?", raw.id)
-        if old:
+        if (
+            old
+        ):  # already catalogued: the admission filters (a price cut below the floor) do not apply
+            seen.add(raw.id)
             db.run(
                 "UPDATE listings SET last_seen=?, active=1, yen=?, gbp=?, info=? WHERE id=?",
                 t,
@@ -169,6 +167,11 @@ def ingest(
                 db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, old["cel_id"])
             continue
 
+        # Converted first, so the minimum price applies to Mercari's pound-only prices too.
+        c = filters.classify(raw.title, raw.extra, yen, raw.cel_category, raw.auction)
+        if not c:
+            continue
+        seen.add(raw.id)
         image, ph = images.download(raw.img_url, s.img_dir, referer=raw.url)
         verdict = llm.classify(
             raw.title, raw.extra, price_text(yen, gbp), s.img_dir / image if image else None
@@ -314,7 +317,8 @@ def _notes(v: dict) -> str:
 READ_WHOLE = {"Mandarake", "Mandarake auction"}
 STALE_DAYS = 3
 # Yahoo auctions run up to seven days, so one can leave the search window and still be running.
-STALE_DAYS_BY_SOURCE = {"Yahoo": 8}
+# A Mandarake auction lot beyond a full 240-lot page is judged the same way (they end too).
+STALE_DAYS_BY_SOURCE = {"Yahoo": 8, "Mandarake auction": 8}
 MAX_CHECKS = 12
 
 
@@ -349,8 +353,10 @@ def retire(
         src = r["source"]
         if r["id"] in seen or src in failed:
             continue
-        if src in READ_WHOLE:
-            gone = src not in partial  # a truncated read proves nothing about what it left out
+        if src in READ_WHOLE and src not in partial:
+            gone = True
+        elif src == "Mandarake":
+            gone = False  # a truncated shop read proves nothing about what it left out
         elif src == "Mercari":
             verdict = checked.get(r["url"])
             if r["url"] in checked:
@@ -460,6 +466,13 @@ def run(
     finally:
         LOCK.release()
     return run_id
+
+
+def new_since_digest(db: DB) -> list:
+    """Today's discoveries: every cel first seen since the last digest, GAINAX ones included."""
+    return db.all(
+        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 ORDER BY first_seen DESC"
+    )
 
 
 def pending(db: DB) -> list:

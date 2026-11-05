@@ -121,14 +121,19 @@ class LLM:
         if image and image.exists():
             content.append(_image_part(image))
         v = self._ask(content)
-        if not v or v.get("kind") not in {
-            "cel",
-            "genga",
-            "douga",
-            "reproduction",
-            "print",
-            "not_art",
-        }:
+        if (
+            not v
+            or not isinstance(v.get("kind"), str)
+            or v["kind"]
+            not in {
+                "cel",
+                "genga",
+                "douga",
+                "reproduction",
+                "print",
+                "not_art",
+            }
+        ):
             return None
         # Normalise every field ingestion reads: a null or wrong type falls back to empty.
         out: dict = {"kind": v["kind"]}
