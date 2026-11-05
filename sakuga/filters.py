@@ -132,7 +132,7 @@ def classify(
         and REPRO.search(text)
         and REPRO_CEL.search(text)
         and GAINAX_LIMITED.search(text)
-        and not re.search(r"景品|プライズ", text)
+        and not JUNK.search(text)  # prizes, prints, fan art: never GAINAX's own
     ):
         return {"franchise": key, "kind": "gainax-limited"}
     if JUNK.search(text) or REPRO.search(text):

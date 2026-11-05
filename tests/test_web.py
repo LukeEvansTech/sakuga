@@ -356,3 +356,23 @@ def test_unsearched_source_keeps_its_listings(env, monkeypatch):
     monkeypatch.setattr(sweep, "to_check", lambda db: [])
     sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
     assert db.one("SELECT active FROM listings WHERE id = 'ebay:9'")["active"] == 1
+
+
+def test_one_failed_search_does_not_silence_a_source(env, monkeypatch):
+    s, db = env  # a fresh catalogue whose first sweep loses one Yahoo search
+
+    def collect(s, db, run_id, _check=None):
+        for i, (name, _, _) in enumerate(sweep.search_jobs(s)):
+            db.run(
+                "INSERT INTO run_sources (run_id, name, count) VALUES (?, ?, ?)",
+                run_id,
+                name,
+                None if i == 0 else 0,
+            )
+        return [], {"Yahoo"}, set(), {}
+
+    monkeypatch.setattr(sweep, "collect", collect)
+    monkeypatch.setattr(sweep, "to_check", lambda db: [])
+    db.run("DELETE FROM kv")
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert "Yahoo" in db.get("baselined_sources", [])

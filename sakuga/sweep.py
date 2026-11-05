@@ -554,8 +554,7 @@ def run(
         if rate:
             db.put("yen_per_gbp", rate)
         baseline = not db.get("baselined", False)
-        # A source added later gets its own quiet first read, as the whole catalogue did; it counts
-        # as read once every one of its searches has succeeded, even with no results.
+        # A source added later gets its own quiet first read, as the whole catalogue did.
         families = {family for _, family, _ in search_jobs(s)}
         known = db.get("baselined_sources", None)
         if known is None:
@@ -571,7 +570,14 @@ def run(
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")
         if baseline and ok_jobs:
             db.put("baselined", True)
-        done = quiet - failed if ok_jobs else set()
+        # As the whole catalogue always has: a source is baselined by its first sweep with any read.
+        read_ok = {
+            r["name"]
+            for r in db.all(
+                "SELECT name FROM run_sources WHERE run_id = ? AND count IS NOT NULL", run_id
+            )
+        }
+        done = {family for name, family, _ in search_jobs(s) if name in read_ok} & quiet
         if done or db.get("baselined_sources", None) is None:
             db.put("baselined_sources", sorted(set(known) | done))
         db.run(
