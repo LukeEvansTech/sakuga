@@ -44,6 +44,15 @@ CARDS_JS = r"""([sel, idre]) => {
 }"""
 
 
+PAGE_CAP = 240  # both Mandarake lists show at most this many; a full page may be cut short
+
+
+class Results(list):
+    """A search's listings; complete is False when the page may not hold every listing."""
+
+    complete = True
+
+
 @dataclass
 class Raw:
     """One listing as a site shows it."""
@@ -173,7 +182,8 @@ def mandarake_shop(page) -> list[Raw]:
     rows = page.evaluate(CARDS_JS, ["a[href*='itemCode=']", r"itemCode=(\d+)"])
     if not rows:
         raise RuntimeError(f"no Mandarake shop items (page {page.url[:80]})")
-    out = []
+    out = Results()
+    out.complete = len(rows) < PAGE_CAP
     for r in rows:
         m = re.search(r"([\d,]+)円\s*\(税込\s*([\d,]+)円\)", r["text"])
         yen = int(m.group(2).replace(",", "")) if m else yen_of(r["text"])
@@ -199,17 +209,19 @@ def mandarake_auction(page) -> list[Raw]:
         "https://ekizo.mandarake.co.jp/auction/item/itemsListJa.html?category=anime_cel",
         "a[id^=goItemInfo]",
     )
+    expanded = True
     try:
         with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
-            page.evaluate("setSearchOption('doSetListCount', 'listCount', 240)")
+            page.evaluate(f"setSearchOption('doSetListCount', 'listCount', {PAGE_CAP})")
         page.wait_for_selector("a[id^=goItemInfo]", timeout=20000)
         page.wait_for_timeout(2000)
     except Exception:  # pylint: disable=broad-exception-caught
-        pass  # the first page (about 72 lots) still reads
+        expanded = False  # the first page (about 72 lots) still reads, but is not the whole section
     rows = page.evaluate(CARDS_JS, ["a[href*='itemInfoJa.html?index=']", r"index=(\d+)"])
     if not rows:
         raise RuntimeError("no Mandarake auction lots")
-    out = []
+    out = Results()
+    out.complete = expanded and len(rows) < PAGE_CAP
     for r in rows:
         m = re.search(r"\[\d+\]\s*(.+?)\s*\|?\s*Watch", r["text"])
         left = re.search(r"(ライブ開始まで|残り)\s*([\d日時間分秒]+)", r["text"])
@@ -227,6 +239,25 @@ def mandarake_auction(page) -> list[Raw]:
             )
         )
     return out
+
+
+def mercari_available(page, url: str) -> bool | None:
+    """Whether a Mercari item is still for sale: True, False, or None when the page did not say.
+
+    The item page's buy box reads 今すぐBuyeeで購入 while it is for sale and "See more items!" once
+    sold (checked 2026-11-05); a removed item has no buy box and no Mercari title.
+    """
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    try:
+        page.wait_for_selector('[data-testid="checkout-button-container"]', timeout=15000)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return False if "メルカリ" not in page.title() else None
+    text = page.inner_text('[data-testid="checkout-button-container"]')
+    if "購入" in text:
+        return True
+    if "See more items" in text or "売り切れ" in text:
+        return False
+    return None
 
 
 Job = tuple[str, str, Callable]  # (name, family, fn(page) -> list[Raw])

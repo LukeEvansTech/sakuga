@@ -17,22 +17,30 @@ from . import catalog, filters, images, notify
 from .config import Settings
 from .db import DB
 from .llm import LLM
-from .sources import UA, Raw, jobs
+from .sources import UA, Raw, jobs, mercari_available
 
 log = logging.getLogger(__name__)
 LOCK = threading.Lock()
+# The digest runs on its own scheduler thread: one lock covers choosing, sending and marking, so a
+# GAINAX cel cannot go out both instantly and in the digest.
+NOTIFY_LOCK = threading.Lock()
 
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def collect(s: Settings, db: DB, run_id: int) -> tuple[list[Raw], set[str]]:
-    """Every listing from every search, and the families with a failed search (not retired)."""
+def collect(
+    s: Settings, db: DB, run_id: int, check: list[str] | None = None
+) -> tuple[list[Raw], set[str], set[str], dict[str, bool | None]]:
+    """Every listing from every search; the families with a failed search and with a partial read
+    (neither is retired on absence); and, for each Mercari URL in check, whether it is for sale."""
     from playwright.sync_api import sync_playwright  # pylint: disable=import-outside-toplevel
 
     raws: list[Raw] = []
     failed: set[str] = set()
+    partial: set[str] = set()
+    checked: dict[str, bool | None] = {}
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=s.headless)
         try:
@@ -57,6 +65,8 @@ def collect(s: Settings, db: DB, run_id: int) -> tuple[list[Raw], set[str]]:
                 else:
                     raws += got
                     err = ""
+                    if not getattr(got, "complete", True):
+                        partial.add(family)
                 db.run(
                     "INSERT OR REPLACE INTO run_sources (run_id, name, count, error, seconds) VALUES (?,?,?,?,?)",
                     run_id,
@@ -65,9 +75,14 @@ def collect(s: Settings, db: DB, run_id: int) -> tuple[list[Raw], set[str]]:
                     err or None,
                     round(time.monotonic() - started, 1),
                 )
+            for url in check or []:
+                try:
+                    checked[url] = mercari_available(page, url)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    checked[url] = None
         finally:
             browser.close()
-    return raws, failed
+    return raws, failed, partial, checked
 
 
 def yen_per_gbp(raws: list[Raw], old: float | None) -> float | None:
@@ -249,23 +264,56 @@ def _notes(v: dict) -> str:
     return " · ".join(bits)[:400]
 
 
-# Mandarake's sections are read whole, so a listing missing from them is gone. Yahoo (Buyee) and
-# Mercari searches show a window of the newest results, so a listing missing from one may simply
-# have dropped out of it: those retire only after STALE_DAYS unseen. Auctions end within a week
-# and a relist gets a new ID, so three days unseen means gone.
+# How a listing missing from this sweep's results retires:
+# - Mandarake shop and auctions are read whole (when the read was complete), so it is gone.
+# - Yahoo (Buyee) searches show a window of results; auctions end within a week and a relist gets
+#   a new ID, so STALE_DAYS unseen means gone.
+# - Mercari is fixed price and can sit unsold for months outside the search window, so a stale
+#   listing is checked on its own page and retires only when the page says it is sold or removed.
 READ_WHOLE = {"Mandarake", "Mandarake auction"}
 STALE_DAYS = 3
+MAX_CHECKS = 12
 
 
-def retire(db: DB, seen: set[str], failed: set[str]) -> None:
-    """Retire listings that are gone; never on a site whose search failed this sweep."""
-    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=STALE_DAYS)).strftime(
-        "%Y-%m-%d %H:%M:%S"
+def _cutoff() -> str:
+    t = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=STALE_DAYS)
+    return t.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def to_check(db: DB) -> list[str]:
+    """Stale Mercari listings whose own page decides whether they retire, oldest first."""
+    rows = db.all(
+        "SELECT url FROM listings WHERE active = 1 AND source = 'Mercari' AND last_seen < ?"
+        " ORDER BY last_seen LIMIT ?",
+        _cutoff(),
+        MAX_CHECKS,
     )
-    for r in db.all("SELECT id, source, last_seen FROM listings WHERE active = 1"):
-        if r["id"] in seen or r["source"] in failed:
+    return [r["url"] for r in rows]
+
+
+def retire(
+    db: DB,
+    seen: set[str],
+    failed: set[str],
+    partial: frozenset[str] | set[str] = frozenset(),
+    checked: dict[str, bool | None] | None = None,
+) -> None:
+    """Retire listings that are gone; never on a site whose search failed this sweep."""
+    cutoff, checked = _cutoff(), checked or {}
+    for r in db.all("SELECT id, source, url, last_seen FROM listings WHERE active = 1"):
+        src = r["source"]
+        if r["id"] in seen or src in failed:
             continue
-        if r["source"] in READ_WHOLE or r["last_seen"] < cutoff:
+        if src in READ_WHOLE and src not in partial:
+            gone = True
+        elif src == "Mercari":
+            verdict = checked.get(r["url"])
+            if verdict:  # still for sale outside the search window
+                db.run("UPDATE listings SET last_seen = ? WHERE id = ?", now(), r["id"])
+            gone = verdict is False
+        else:
+            gone = r["last_seen"] < cutoff
+        if gone:
             db.run("UPDATE listings SET active = 0 WHERE id = ?", r["id"])
     db.run(
         "UPDATE cels SET available = EXISTS (SELECT 1 FROM listings l WHERE l.cel_id = cels.id"
@@ -274,6 +322,12 @@ def retire(db: DB, seen: set[str], failed: set[str]) -> None:
 
 
 def instant(db: DB, s: Settings) -> list[str]:
+    """Instant alerts under the notify lock."""
+    with NOTIFY_LOCK:
+        return _instant(db, s)
+
+
+def _instant(db: DB, s: Settings) -> list[str]:
     """GAINAX limited cels alert at once (priority 1); everything else waits for the digest.
 
     Read from the catalogue, not this sweep's new cels, so a send that failed is retried next sweep.
@@ -310,7 +364,7 @@ def run(
     model = llm or LLM(s.llm_url, s.llm_key, s.llm_model)
     run_id = db.run("INSERT INTO runs (started, trigger) VALUES (?, ?)", now(), trigger)
     try:
-        raws, failed = collect(s, db, run_id)
+        raws, failed, partial, checked = collect(s, db, run_id, to_check(db))
         row = db.one(
             "SELECT COUNT(*) n FROM run_sources WHERE run_id = ? AND count IS NOT NULL", run_id
         )
@@ -320,7 +374,7 @@ def run(
             db.put("yen_per_gbp", rate)
         baseline = not db.get("baselined", False)
         got = ingest(db, s, model, raws, rate, baseline)
-        retire(db, got["seen"], failed)
+        retire(db, got["seen"], failed, partial, checked)
         alerts = instant(db, s) if notify_on else []
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")
         if baseline and ok_jobs:
@@ -369,6 +423,12 @@ def pending(db: DB) -> list:
 
 
 def digest(db: DB, s: Settings, notify_on: bool = True) -> str:
+    """The daily digest under the notify lock."""
+    with NOTIFY_LOCK:
+        return _digest(db, s, notify_on)
+
+
+def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
     """The daily alert: one message for every cel first seen since the last one. Nothing new, no alert."""
     cels = pending(db)
     if not cels:

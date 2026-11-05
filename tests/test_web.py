@@ -1,6 +1,7 @@
 """Pages render, and the sweep's alert and retirement rules hold, on a small catalogue."""
 
 import dataclasses
+import datetime as dt
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +9,8 @@ from sakuga import config, notify, sweep
 from sakuga.db import DB
 from sakuga.web import create_app
 
-T = "2026-11-05 09:00:00"
+# Relative to now: retire() compares last_seen with the real clock.
+T = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 @pytest.fixture
@@ -88,16 +90,34 @@ def test_digest_marks_cels_only_after_send(env, monkeypatch):
 
 def test_retire_rules(env):
     _, db = env
-    old = "2026-10-01 09:00:00"
+    old = "2026-01-01 09:00:00"
     db.run("UPDATE listings SET source = 'Mandarake' WHERE id = 'yahoo:a2'")
-    db.run("UPDATE listings SET last_seen = ? WHERE id = 'yahoo:a1'", old)
-    sweep.retire(db, seen=set(), failed={"Mercari"})
+    db.run("UPDATE listings SET last_seen = ? WHERE id IN ('yahoo:a1', 'mercari:m3')", old)
+    assert sweep.to_check(db) == ["https://example.invalid/m"]
+    # Mercari m3 is stale but its page says it is still for sale: kept, and seen again.
+    sweep.retire(db, seen=set(), failed=set(), checked={"https://example.invalid/m": True})
     active = {r["id"] for r in db.all("SELECT id FROM listings WHERE active = 1")}
-    # a1: Yahoo, unseen for weeks: gone. a2: Mandarake (read whole), unseen: gone.
-    # a3: Yahoo, seen today, may just have left the search window: kept. m3: Mercari failed: kept.
+    # a1: Yahoo unseen for months: gone. a2: Mandarake (read whole), unseen: gone.
+    # a3: Yahoo, seen an hour ago, may just have left the search window: kept.
     assert active == {"yahoo:a3", "mercari:m3"}
+    assert sweep.to_check(db) == []
     avail = {r["id"]: r["available"] for r in db.all("SELECT id, available FROM cels")}
     assert avail == {1: 0, 2: 0, 3: 1}
+
+
+def test_retire_needs_complete_reads_and_mercari_proof(env):
+    _, db = env
+    db.run("UPDATE listings SET source = 'Mandarake' WHERE id = 'yahoo:a2'")
+    db.run("UPDATE listings SET last_seen = '2026-01-01 09:00:00' WHERE id = 'mercari:m3'")
+    sweep.retire(db, seen=set(), failed=set(), partial={"Mandarake"}, checked={})
+    active = {r["id"] for r in db.all("SELECT id FROM listings WHERE active = 1")}
+    assert {"yahoo:a2", "mercari:m3"} <= active  # partial read; Mercari page not checked
+    sweep.retire(db, seen=set(), failed={"Mercari"}, checked={"https://example.invalid/m": False})
+    assert (
+        db.one("SELECT active FROM listings WHERE id = 'mercari:m3'")["active"] == 1
+    )  # site failed
+    sweep.retire(db, seen=set(), failed=set(), checked={"https://example.invalid/m": False})
+    assert db.one("SELECT active FROM listings WHERE id = 'mercari:m3'")["active"] == 0  # sold
 
 
 def test_digest_off_keeps_cels_pending(env):
