@@ -392,7 +392,7 @@ def _instant(db: DB, s: Settings) -> list[str]:
     ):
         cel_id = cel["id"]
         lst = db.one(
-            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY first_seen LIMIT 1",
+            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY active DESC, first_seen LIMIT 1",
             cel_id,
         )
         price = price_text(lst["yen"], lst["gbp"]) if lst else ""
@@ -475,7 +475,7 @@ def new_since_digest(db: DB) -> list:
     since = last["t"] if last and last["t"] else ""
     return db.all(
         "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0"
-        " AND (instant_sent IS NULL OR first_seen >= ?) ORDER BY first_seen DESC",
+        " AND (instant_sent IS NULL OR instant_sent >= ?) ORDER BY first_seen DESC",
         since,
     )
 
@@ -509,7 +509,7 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
     ]
     for c in cels[:6]:
         lst = db.one(
-            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY first_seen LIMIT 1",
+            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY active DESC, first_seen LIMIT 1",
             c["id"],
         )
         lines.append(

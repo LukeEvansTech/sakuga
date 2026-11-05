@@ -132,6 +132,8 @@ def buyee(page, q: str) -> list[Raw]:
                 cel_category=True,
             )
         )
+    if not out:
+        raise RuntimeError("Buyee cards held no readable item links")
     return out
 
 
