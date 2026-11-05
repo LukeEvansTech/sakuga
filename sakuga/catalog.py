@@ -91,6 +91,7 @@ def group(
         asks += [
             cel_id for d, cel_id, t in scored if d > MAYBE and title_sim(title, t) >= TITLE_SIM
         ]
+    asks = list(dict.fromkeys(asks))  # one cel may have several known photos
     for cel_id in asks[:MAX_ASKS]:
         if same and same(cel_id):
             return cel_id

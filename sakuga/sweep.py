@@ -163,7 +163,7 @@ def ingest(
                             ph,
                             old["cel_id"],
                         )
-                        regroup(db, llm, s, raw.id, old["cel_id"], image, ph)
+                        regroup(db, llm, s, raw, old["cel_id"], image, ph)
             if old["ok"] and old["cel_id"]:
                 kept += 1
                 db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, old["cel_id"])
@@ -177,13 +177,7 @@ def ingest(
         cel_id = None
         if k.ok:
             kept += 1
-            cands = [
-                catalog.Candidate(r["id"], r["phash"], r["franchise"], r["title_jp"])
-                for r in db.all(
-                    "SELECT id, phash, franchise, title_jp FROM cels WHERE franchise = ?",
-                    c["franchise"],
-                )
-            ]
+            cands = candidates(db, c["franchise"])
             cel_id = catalog.group(
                 ph, c["franchise"], cands, _same_fn(db, llm, s.img_dir, raw.id, image), raw.title
             )
@@ -249,33 +243,49 @@ def ingest(
     return {"seen": seen, "kept": kept, "new_cels": new_cels}
 
 
-def regroup(
-    db: DB, llm: LLM, s: Settings, listing_id: str, cel_id: int, image: str, ph: str
-) -> None:
-    """A photo that arrived late may show a cel already catalogued: if this listing's cel holds
-    only this listing and has not been announced, fold it into the matching cel."""
-    cel = db.one("SELECT * FROM cels WHERE id = ?", cel_id)
-    n = db.one("SELECT COUNT(*) n FROM listings WHERE cel_id = ?", cel_id)
-    if not cel or not n or n["n"] != 1 or cel["digest_id"] or cel["instant_sent"]:
-        return
-    cands = [
-        catalog.Candidate(r["id"], r["phash"], r["franchise"], r["title_jp"])
-        for r in db.all(
-            "SELECT id, phash, franchise, title_jp FROM cels WHERE franchise = ? AND id != ?",
-            cel["franchise"],
-            cel_id,
-        )
-    ]
-    match = catalog.group(
-        ph, cel["franchise"], cands, _same_fn(db, llm, s.img_dir, listing_id, image)
+def candidates(db: DB, franchise: str, exclude: int = 0) -> list[catalog.Candidate]:
+    """Every known photo of every cel in the franchise: each cel's own, and each of its listings'
+    (a relist may reuse any photo the cel was ever shown with, under any title)."""
+    rows = db.all(
+        "SELECT id AS cel, phash, title_jp AS title FROM cels WHERE franchise = ? AND id != ?"
+        " UNION ALL SELECT cel_id, phash, title FROM listings"
+        " WHERE franchise = ? AND ok = 1 AND cel_id IS NOT NULL AND cel_id != ? AND phash != ''",
+        franchise,
+        exclude,
+        franchise,
+        exclude,
     )
-    if match is None:
-        return
-    with db.tx() as con:
-        con.execute("UPDATE listings SET cel_id = ? WHERE id = ?", (match, listing_id))
-        con.execute("UPDATE cels SET last_seen = ?, available = 1 WHERE id = ?", (now(), match))
-        con.execute("DELETE FROM cels WHERE id = ?", (cel_id,))
-    log.info("listing %s joined cel %d (its photo arrived late)", listing_id, match)
+    return [catalog.Candidate(r["cel"], r["phash"], franchise, r["title"]) for r in rows]
+
+
+def regroup(db: DB, llm: LLM, s: Settings, raw: Raw, cel_id: int, image: str, ph: str) -> None:
+    """A photo that arrived late may show a cel already catalogued: if this listing's cel holds
+    only this listing and has not been announced, fold it into the matching cel. Held under the
+    notify lock so a cel is never merged away while a digest is sending it."""
+    with NOTIFY_LOCK:
+        cel = db.one("SELECT * FROM cels WHERE id = ?", cel_id)
+        n = db.one("SELECT COUNT(*) n FROM listings WHERE cel_id = ?", cel_id)
+        if not cel or not n or n["n"] != 1 or cel["digest_id"] or cel["instant_sent"]:
+            return
+        match = catalog.group(
+            ph,
+            cel["franchise"],
+            candidates(db, cel["franchise"], cel_id),
+            _same_fn(db, llm, s.img_dir, raw.id, image),
+            raw.title,
+        )
+        if match is None:
+            return
+        with db.tx() as con:
+            con.execute("UPDATE listings SET cel_id = ? WHERE id = ?", (match, raw.id))
+            # Keep the earlier discovery: a baseline cel stays baseline, never announced as new.
+            con.execute(
+                "UPDATE cels SET last_seen = ?, available = 1, first_seen = MIN(first_seen, ?),"
+                " baseline = MAX(baseline, ?) WHERE id = ?",
+                (now(), cel["first_seen"], cel["baseline"], match),
+            )
+            con.execute("DELETE FROM cels WHERE id = ?", (cel_id,))
+    log.info("listing %s joined cel %d (its photo arrived late)", raw.id, match)
 
 
 def _json(v) -> str:

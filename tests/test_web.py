@@ -155,12 +155,16 @@ def test_interrupted_run_is_closed_on_start(env):
 def test_late_photo_folds_duplicate_into_known_cel(env):
     s, db = env
     h = "0f0f0f0f0f0f0f0f"
-    db.run("UPDATE cels SET phash = ?, image = 'a.jpg' WHERE id = 1", h)
+    llm = LLM("", "", "claude")
+    # cel 1 (baseline) is known by a listing photo only; cel 2's photo arrives late and matches it
     db.run("UPDATE listings SET phash = ? WHERE id = 'yahoo:a1'", h)
-    sweep.regroup(db, LLM("", "", "claude"), s, "yahoo:a2", 2, "b.jpg", h)
+    raw2 = Raw("yahoo:a2", "Yahoo", "セル画", "https://example.invalid/x")
+    sweep.regroup(db, llm, s, raw2, 2, "b.jpg", h)
     assert db.one("SELECT cel_id FROM listings WHERE id = 'yahoo:a2'")["cel_id"] == 1
     assert db.one("SELECT id FROM cels WHERE id = 2") is None
-    sweep.regroup(db, LLM("", "", "claude"), s, "mercari:m3", 3, "c.jpg", h)
+    assert db.one("SELECT baseline FROM cels WHERE id = 1")["baseline"] == 1
+    raw3 = Raw("mercari:m3", "Mercari", "セル画", "https://example.invalid/m")
+    sweep.regroup(db, llm, s, raw3, 3, "c.jpg", h)
     assert db.one("SELECT id FROM cels WHERE id = 3")  # two listings on cel 3: left alone
 
 
