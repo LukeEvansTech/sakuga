@@ -391,7 +391,7 @@ class _Seen(LLM):
 
 
 def _fake_download(names):
-    def download(url, *a, **k):
+    def download(url, *_a, **_k):
         return (names[url], "0f0f0f0f0f0f0f0f") if url in names else ("", "")
 
     return download
