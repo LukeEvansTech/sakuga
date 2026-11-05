@@ -225,3 +225,27 @@ def test_backfill_rotates_failures_and_applies_gainax(env):
     gx = _Says({"kind": "reproduction", "gainax_limited": True, "title_en": "Kaworu 04/100"})
     sweep.backfill(db, gx, s, limit=4)
     assert db.one("SELECT gainax, kind FROM cels WHERE id = 3")["gainax"] == 1
+
+
+def test_relist_of_rejected_artwork_stays_out_when_the_llm_fails(env, monkeypatch):
+    s, db = env
+    h = "0f0f0f0f0f0f0f0f"
+    db.run(
+        "UPDATE listings SET image = 'a.jpg', phash = ?, first_seen = '2099-01-01 00:00:00'"
+        " WHERE id = 'yahoo:a2'",
+        h,
+    )
+    sweep.backfill(db, _Says({"kind": "cel", "cel_club": True}), s, limit=1)
+    assert db.one("SELECT id FROM cels WHERE id = 2") is None
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("r.jpg", h))
+    relist = Raw(
+        "mercari:r1",
+        "Mercari",
+        "エヴァンゲリオン セル画 綾波レイ",
+        "https://example.invalid/r",
+        yen=9000,
+    )
+    got = sweep.ingest(db, s, _Says(None), [relist], 200.0, False)
+    assert got["new_cels"] == []
+    row = db.one("SELECT ok, reason FROM listings WHERE id = 'mercari:r1'")
+    assert (row["ok"], row["reason"]) == (0, "same photo as rejected yahoo:a2")

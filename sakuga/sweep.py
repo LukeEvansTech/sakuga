@@ -177,6 +177,9 @@ def ingest(
             raw.title, raw.extra, price_text(yen, gbp), s.img_dir / image if image else None
         )
         k = catalog.keep(c["franchise"], c["kind"], verdict)
+        if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
+            # No answer this time, but the same photo was rejected before: a relist of that artwork.
+            k = catalog.Keep(False, twin["kind"], False, f"same photo as rejected {twin['id']}")
         cel_id = None
         if k.ok:
             kept += 1
@@ -244,6 +247,18 @@ def ingest(
                 yen,
             )
     return {"seen": seen, "kept": kept, "new_cels": new_cels}
+
+
+def rejected_twin(db: DB, franchise: str, ph: str):
+    """A listing the LLM rejected whose photo is this one (a relist), or None."""
+    if not ph:
+        return None
+    rows = db.all(
+        "SELECT id, kind, phash FROM listings WHERE franchise = ? AND ok = 0 AND verdict != ''"
+        " AND phash != ''",
+        franchise,
+    )
+    return next((r for r in rows if images.distance(ph, r["phash"]) <= catalog.NEAR), None)
 
 
 MAX_BACKFILL = 10
