@@ -446,8 +446,8 @@ def test_a_kept_listing_is_asked_again_once_its_photos_arrive(env, monkeypatch):
     row = db.one("SELECT photos, photos_done FROM listings WHERE id = 'yahoo:a4'")
     assert (row["photos"], row["photos_done"]) == ('["seal.jpg", "back.jpg"]', 1)
     llm = _Seen({"kind": "cel", "cel_club": True})
-    assert sweep.backfill(db, llm, s) == 2
-    assert sorted(llm.calls) == [["a.jpg", "seal.jpg"], ["seal.jpg", "back.jpg"]]  # no main photo
+    assert sweep.backfill(db, llm, s) == 1  # yahoo:a4 waits for its main photo
+    assert llm.calls == [["a.jpg", "seal.jpg"]]
     row = db.one("SELECT ok, recheck FROM listings WHERE id = 'yahoo:a2'")
     assert (row["ok"], row["recheck"]) == (0, 0)
     assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 1

@@ -267,7 +267,8 @@ def ingest(
             raw.title,
             raw.extra,
             price_text(yen, gbp),
-            [s.img_dir / f for f in ([image] if image else []) + more],
+            # Never the further photos alone: a douga beside a cel would read as the listing.
+            [s.img_dir / f for f in [image, *more]] if image else [],
         )
         k = catalog.keep(c["franchise"], c["kind"], verdict)
         if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
@@ -392,7 +393,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
         "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id,"
         " c.gainax FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
         " WHERE l.ok = 1 AND (l.verdict = '' OR l.recheck = 1)"
-        " AND (l.image != '' OR COALESCE(l.photos, '[]') != '[]')"  # sold ones too: they hold a cel visible
+        " AND l.image != ''"  # sold ones too: they hold a cel visible
         # Never asked first, newest first; then the longest since the last try, so failures rotate.
         " ORDER BY l.asked IS NOT NULL, l.asked, l.first_seen DESC LIMIT ?",
         limit,
@@ -405,7 +406,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
             r["title"],
             r["extra"],
             price_text(r["yen"], r["gbp"]),
-            [s.img_dir / f for f in [r["image"], *more] if f],
+            [s.img_dir / f for f in [r["image"], *more]],
         )
         if not verdict:
             continue
