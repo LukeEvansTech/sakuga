@@ -26,7 +26,9 @@ def start(expr: str, tz: str, job, name: str = "sweep") -> threading.Thread:
         while True:
             at = next_time(expr, tz)
             log.info("next %s at %s", name, at.isoformat())
-            while (wait := (at - dt.datetime.now(ZoneInfo(tz))).total_seconds()) > 0:
+            # Timestamps, not wall-clock datetimes: across the autumn clock change the next time can
+            # read earlier than now in the same zone while being 30 minutes away.
+            while (wait := at.timestamp() - time.time()) > 0:
                 time.sleep(min(wait, 60))
             try:
                 job()

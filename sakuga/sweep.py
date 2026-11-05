@@ -363,6 +363,11 @@ def retire(
                 db.run("UPDATE listings SET checked = ? WHERE id = ?", now(), r["id"])
             if verdict:  # still for sale outside the search window
                 db.run("UPDATE listings SET last_seen = ? WHERE id = ?", now(), r["id"])
+                db.run(
+                    "UPDATE cels SET last_seen = ? WHERE id = (SELECT cel_id FROM listings WHERE id = ?)",
+                    now(),
+                    r["id"],
+                )
             gone = verdict is False
         else:
             gone = r["last_seen"] < _cutoff(src)

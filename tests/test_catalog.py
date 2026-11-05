@@ -90,3 +90,15 @@ def test_llm_answers_are_type_checked(monkeypatch, tmp_path):
     assert v and v["title_en"] == "" and v["characters"] == [] and v["gainax_limited"] is False
     monkeypatch.setattr(m, "_ask", lambda *a, **k: {"kind": ["cel"]})
     assert m.classify("t", "", "", None) is None
+
+
+def test_scheduler_waits_across_the_autumn_clock_change():
+    import datetime as dt  # pylint: disable=import-outside-toplevel
+    from zoneinfo import ZoneInfo  # pylint: disable=import-outside-toplevel
+
+    from sakuga.scheduler import next_time  # pylint: disable=import-outside-toplevel
+
+    london = ZoneInfo("Europe/London")
+    now = dt.datetime(2026, 10, 25, 1, 40, tzinfo=london)  # first 01:40, still BST
+    at = next_time("*/30 * * * *", "Europe/London", now)
+    assert at.timestamp() > now.timestamp()

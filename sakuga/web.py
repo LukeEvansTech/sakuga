@@ -77,7 +77,7 @@ def cel_view(db: DB, row) -> dict:
     listings = [
         dict(r)
         for r in db.all(
-            "SELECT * FROM listings WHERE cel_id = ? AND ok = 1 ORDER BY active DESC, yen",
+            "SELECT * FROM listings WHERE cel_id = ? AND ok = 1 ORDER BY active DESC, yen IS NULL, yen",
             row["id"],
         )
     ]
@@ -179,7 +179,12 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
                 " AND l.source = ?" + (" AND l.active = 1" if show == "available" else "") + ")"
             )
             args.append(source)
-        price = "(SELECT MIN(l.yen) FROM listings l WHERE l.cel_id = c.id AND l.ok = 1 AND l.active = 1)"
+        # The live price, or for a cel no longer for sale its last known one.
+        price = (
+            "COALESCE((SELECT MIN(l.yen) FROM listings l WHERE l.cel_id = c.id AND l.ok = 1"
+            " AND l.active = 1), (SELECT MIN(l.yen) FROM listings l WHERE l.cel_id = c.id"
+            " AND l.ok = 1))"
+        )
         order = {
             "newest": "c.first_seen DESC",
             "longest": "c.first_seen ASC",
