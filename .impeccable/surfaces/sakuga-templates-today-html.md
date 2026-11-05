@@ -2,7 +2,12 @@
 version: 1
 slug: "sakuga-templates-today-html"
 primary_target: "sakuga/templates/today.html"
-related_targets: ["sakuga/templates/catalogue.html","sakuga/templates/cel.html","sakuga/templates/log.html"]
+related_targets:
+  [
+    "sakuga/templates/catalogue.html",
+    "sakuga/templates/cel.html",
+    "sakuga/templates/log.html",
+  ]
 ---
 
 # Surface: Sakuga web UI (Today, Catalogue, Cel, Log)
@@ -19,8 +24,7 @@ FORM: Circle Catalogue (catalog: pop-culture-shelf-doujin-event-catalog), seed:2
 THESIS: The catalogue as a convention circle catalogue: every cel is a numbered cell in a dense,
 ruled whole-cell grid. Refuses the default marketplace card grid of rounded floating tiles.
 
-OWN-WORLD: Newsprint inverted onto oxblood: ground #1f0a0c, rules #5a1c22, shell red #7d1520, ink
-#efe3cf, biro red #f05a4f for marks only, code gold #e8b04a for cell codes and numerals. Archivo Narrow
+OWN-WORLD: Newsprint inverted onto oxblood: ground #1f0a0c, rules #5a1c22, shell red #7d1520, ink #efe3cf, biro red #f05a4f for marks only, code gold #e8b04a for cell codes and numerals. Archivo Narrow
 for codes, numbers and headings; system sans (Hiragino for Japanese) for titles. Square cells ruled
 at 1px, no radius, no shadows except the photo's light ground.
 

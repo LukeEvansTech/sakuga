@@ -6,18 +6,18 @@ numbered cell in a ruled grid, and state is marked by hand in red biro. Built 20
 
 ## Palette
 
-| Token     | Value     | Job                                                          |
-| --------- | --------- | ------------------------------------------------------------ |
-| `ground`  | `#1f0a0c` | Page ground (dark mode only; the phone is read in the morning) |
-| `ground-2`| `#2a0e11` | Hover and control fill                                       |
-| `rule`    | `#5a1c22` | Every rule, border and grid line, 1px                        |
-| `shell`   | `#7d1520` | Current tab, primary button                                  |
-| `ink`     | `#efe3cf` | Text                                                         |
-| `ink-2`   | `#c99a92` | Secondary text and labels                                    |
-| `ink-3`   | `#9b7770` | Gone and disabled text                                       |
-| `biro`    | `#f05a4f` | Hand marks only: the new-cel loop, the gone strike, failures |
-| `gold`    | `#e8b04a` | Cell codes, counts, price history                            |
-| `paper`   | `#efe3cf` | Ground behind every cel photo, so paint reads true           |
+| Token      | Value     | Job                                                            |
+| ---------- | --------- | -------------------------------------------------------------- |
+| `ground`   | `#1f0a0c` | Page ground (dark mode only; the phone is read in the morning) |
+| `ground-2` | `#2a0e11` | Hover and control fill                                         |
+| `rule`     | `#5a1c22` | Every rule, border and grid line, 1px                          |
+| `shell`    | `#7d1520` | Current tab, primary button                                    |
+| `ink`      | `#efe3cf` | Text                                                           |
+| `ink-2`    | `#c99a92` | Secondary text and labels                                      |
+| `ink-3`    | `#9b7770` | Gone and disabled text                                         |
+| `biro`     | `#f05a4f` | Hand marks only: the new-cel loop, the gone strike, failures   |
+| `gold`     | `#e8b04a` | Cell codes, counts, price history                              |
+| `paper`    | `#efe3cf` | Ground behind every cel photo, so paint reads true             |
 
 ## Type
 

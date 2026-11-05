@@ -5,7 +5,7 @@
 {% macro cell(c, new=false) -%}
 {% set gone = not c.available %}
 <li class="cell{{ ' is-new' if new }}{{ ' is-gone' if gone }}">
-  <a href="/cel/{{ c.id }}">
+  <a class="cell-link" href="/cel/{{ c.id }}">
     <span class="cell-head">
       <span class="code">{{ code(c) }}</span>
       <span class="age">{% if new %}New{% elif gone %}Gone{% else %}{{ c.days }}d{% endif %}</span>

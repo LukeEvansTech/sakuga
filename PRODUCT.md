@@ -16,13 +16,13 @@ occasional.
 ## Product Purpose
 
 Sakuga watches Yahoo Auctions (through Buyee), Mercari and Mandarake for production cels of the
-wanted franchises, keeps a catalogue of every cel seen, and tells Luke once a day about the cels he
-has not seen before. Success: no cel worth chasing is missed, and none is announced twice.
+wanted franchises, keeps a catalogue of every cel seen, and sends Luke one message a day about the cels
+never seen before. Success: no cel worth chasing is missed, and none is announced twice.
 
 ## Positioning
 
 It catalogues the artwork, not the listing. Japanese sellers relist expensive cels for months or
-years under new ids and on several sites; Sakuga recognises the same cel by its photo and announces
+years under new IDs and on several sites; Sakuga recognises the same cel by its photo and announces
 it once. Marketplace saved searches alert on every relist.
 
 ## Operating Context
