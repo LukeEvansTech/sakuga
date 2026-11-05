@@ -203,8 +203,9 @@ def test_backfill_drops_cel_club_and_fills_titles(env):
     club = _Says({"kind": "cel", "cel_club": True})
     assert sweep.backfill(db, club, s, limit=1) == 1  # newest first: yahoo:a2
     gone = db.one("SELECT ok, reason, cel_id FROM listings WHERE id = 'yahoo:a2'")
-    assert (gone["ok"], gone["reason"], gone["cel_id"]) == (0, "LLM: Cel Club", None)
-    assert db.one("SELECT id FROM cels WHERE id = 2") is None  # its only listing went
+    assert (gone["ok"], gone["reason"]) == (0, "LLM: Cel Club")
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 1  # hidden, id kept
+    assert all(c["id"] != 2 for c in sweep.pending(db))
     named = _Says({"kind": "cel", "title_en": "Rei in the entry plug", "notes": "no douga"})
     assert sweep.backfill(db, named, s) == 1  # yahoo:a1; answered listings are not asked again
     assert sweep.backfill(db, named, s) == 0
@@ -236,7 +237,6 @@ def test_relist_of_rejected_artwork_stays_out_when_the_llm_fails(env, monkeypatc
         h,
     )
     sweep.backfill(db, _Says({"kind": "cel", "cel_club": True}), s, limit=1)
-    assert db.one("SELECT id FROM cels WHERE id = 2") is None
     monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("r.jpg", h))
     relist = Raw(
         "mercari:r1",

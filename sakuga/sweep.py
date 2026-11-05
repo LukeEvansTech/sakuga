@@ -268,7 +268,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
     """Ask the LLM again about kept listings it never answered for (a timeout, a cut-off reply).
 
     The verdict counts as it would have on first sight: a Cel Club cel, print or drawing leaves the
-    catalogue (with its cel if nothing else holds it), and kind and GAINAX follow the LLM. Returns the number answered.
+    catalogue (its cel is hidden if nothing else holds it), and kind and GAINAX follow the LLM. Returns the number answered.
     """
     rows = db.all(
         "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.franchise, l.cel_id, c.gainax"
@@ -288,35 +288,37 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
             continue
         answered += 1
         k = catalog.keep(r["franchise"], "gainax-limited" if r["gainax"] else "cel", verdict)
-        with NOTIFY_LOCK:
+        # One transaction per listing: an interruption leaves the listing and its cel consistent.
+        with NOTIFY_LOCK, db.tx() as con:
             if not k.ok:
-                db.run(
-                    "UPDATE listings SET verdict=?, ok=0, reason=?, kind=?, cel_id=NULL WHERE id=?",
-                    _json(verdict),
-                    k.reason,
-                    k.kind,
-                    r["id"],
+                con.execute(
+                    "UPDATE listings SET verdict=?, ok=0, reason=?, kind=? WHERE id=?",
+                    (_json(verdict), k.reason, k.kind, r["id"]),
                 )
-                if r["cel_id"] and not db.one(
-                    "SELECT 1 FROM listings WHERE cel_id = ? AND ok = 1", r["cel_id"]
-                ):
-                    db.run("DELETE FROM cels WHERE id = ?", r["cel_id"])
+                # Hidden, not deleted: its id stays out of reuse (alert links), and relists still match it.
+                con.execute(
+                    "UPDATE cels SET rejected = 1 WHERE id = ? AND NOT EXISTS"
+                    " (SELECT 1 FROM listings WHERE cel_id = cels.id AND ok = 1)",
+                    (r["cel_id"],),
+                )
                 log.info("listing %s dropped on a second look: %s", r["id"], k.reason)
                 continue
-            db.run(
-                "UPDATE listings SET verdict=?, kind=? WHERE id=?", _json(verdict), k.kind, r["id"]
+            con.execute(
+                "UPDATE listings SET verdict=?, kind=? WHERE id=?",
+                (_json(verdict), k.kind, r["id"]),
             )
-            if r["cel_id"]:
-                db.run(
-                    "UPDATE cels SET title_en = CASE WHEN title_en = '' THEN ? ELSE title_en END,"
-                    " notes = CASE WHEN notes = '' THEN ? ELSE notes END,"
-                    " kind = ?, gainax = ? WHERE id = ?",
+            con.execute(
+                "UPDATE cels SET title_en = CASE WHEN title_en = '' THEN ? ELSE title_en END,"
+                " notes = CASE WHEN notes = '' THEN ? ELSE notes END,"
+                " kind = ?, gainax = ? WHERE id = ?",
+                (
                     verdict.get("title_en", ""),
                     _notes(verdict),
                     k.kind,
                     int(k.gainax),  # the LLM decides GAINAX either way, as on first sight
                     r["cel_id"],
-                )
+                ),
+            )
     return answered
 
 
@@ -466,7 +468,7 @@ def _instant(db: DB, s: Settings) -> list[str]:
     """
     out = []
     for cel in db.all(
-        "SELECT * FROM cels WHERE gainax = 1 AND baseline = 0 AND instant_sent IS NULL"
+        "SELECT * FROM cels WHERE gainax = 1 AND baseline = 0 AND instant_sent IS NULL AND rejected = 0"
         " AND digest_id IS NULL"
     ):
         cel_id = cel["id"]
@@ -554,7 +556,7 @@ def new_since_digest(db: DB) -> list:
     last = db.one("SELECT MAX(created) t FROM digests")
     since = last["t"] if last and last["t"] else ""
     return db.all(
-        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0"
+        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 AND rejected = 0"
         " AND (instant_sent IS NULL OR instant_sent >= ?) ORDER BY first_seen DESC",
         since,
     )
@@ -563,7 +565,7 @@ def new_since_digest(db: DB) -> list:
 def pending(db: DB) -> list:
     """Cels first seen since the last digest (the first sweep's catalogue is not news)."""
     return db.all(
-        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 AND instant_sent IS NULL"
+        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 AND instant_sent IS NULL AND rejected = 0"
         " ORDER BY first_seen DESC"
     )
 
