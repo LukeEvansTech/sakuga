@@ -80,3 +80,13 @@ def test_gbp_from_both_page_languages():
     assert gbp_of("(677.28ポンド)") == 677.28
     assert gbp_of("£1,503") == 1503.0
     assert gbp_of("575円") is None
+
+
+def test_cel_club_in_any_spelling_is_dropped():
+    # 俱 is the other common form of 倶; Cel Club is never wanted, even with GAINAX words.
+    assert k("新世紀エヴァンゲリオン セル画俱楽部 綾波レイ", yen=8000) is None
+    assert k("エヴァンゲリオン セル画クラブ 碇シンジ", yen=8000) is None
+    assert k("エヴァンゲリオン セル画 ＣＥＬ ＣＬＵＢ アスカ", yen=8000) is None
+    assert k("エヴァンゲリオン セル画 アスカ", "Evangelion Cell Club Asuka", yen=8000) is None
+    t = "エヴァンゲリオン 公式複製セル画 GAINAX 限定100部 セル画 倶楽部"
+    assert k(t, yen=30000) is None
