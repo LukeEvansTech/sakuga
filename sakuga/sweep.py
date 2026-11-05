@@ -469,9 +469,14 @@ def run(
 
 
 def new_since_digest(db: DB) -> list:
-    """Today's discoveries: every cel first seen since the last digest, GAINAX ones included."""
+    """Today's discoveries: cels first seen since the last digest. A GAINAX cel alerted instantly
+    never joins a digest, so it shows only until the next digest goes out."""
+    last = db.one("SELECT MAX(created) t FROM digests")
+    since = last["t"] if last and last["t"] else ""
     return db.all(
-        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 ORDER BY first_seen DESC"
+        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0"
+        " AND (instant_sent IS NULL OR first_seen >= ?) ORDER BY first_seen DESC",
+        since,
     )
 
 

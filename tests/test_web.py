@@ -143,6 +143,8 @@ def test_instant_alert_retries_and_skips_digest(env, monkeypatch):
     assert sweep.instant(db, s) == ["cel 2: sent"]  # retried on the next sweep
     assert [c["id"] for c in sweep.pending(db)] == [3]  # announced once, not again in the digest
     assert {c["id"] for c in sweep.new_since_digest(db)} == {2, 3}  # still on Today
+    db.run("INSERT INTO digests (created, cels, result) VALUES ('2999-01-01 00:00:00', 1, 'sent')")
+    assert {c["id"] for c in sweep.new_since_digest(db)} == {3}  # gone after the next digest
     assert not sweep.instant(db, s)
 
 
