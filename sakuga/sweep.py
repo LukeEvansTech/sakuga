@@ -206,7 +206,8 @@ def ingest(
                 )
                 new_cels.append(cel_id)
             else:
-                db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, cel_id)
+                # An accepted listing joining a cel hidden on a second look brings it back.
+                db.run("UPDATE cels SET last_seen=?, available=1, rejected=0 WHERE id=?", t, cel_id)
                 if image:
                     db.run(
                         "UPDATE cels SET image=?, phash=? WHERE id=? AND image=''",
@@ -473,7 +474,8 @@ def _instant(db: DB, s: Settings) -> list[str]:
     ):
         cel_id = cel["id"]
         lst = db.one(
-            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY active DESC, first_seen LIMIT 1",
+            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? AND ok = 1"
+            " ORDER BY active DESC, first_seen LIMIT 1",
             cel_id,
         )
         price = price_text(lst["yen"], lst["gbp"]) if lst else ""
@@ -591,7 +593,8 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
     ]
     for c in cels[:6]:
         lst = db.one(
-            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY active DESC, first_seen LIMIT 1",
+            "SELECT source, yen, gbp FROM listings WHERE cel_id = ? AND ok = 1"
+            " ORDER BY active DESC, first_seen LIMIT 1",
             c["id"],
         )
         lines.append(

@@ -249,3 +249,23 @@ def test_relist_of_rejected_artwork_stays_out_when_the_llm_fails(env, monkeypatc
     assert not got["new_cels"]
     row = db.one("SELECT ok, reason FROM listings WHERE id = 'mercari:r1'")
     assert (row["ok"], row["reason"]) == (0, "same photo as rejected yahoo:a2")
+
+
+def test_accepted_relist_brings_a_hidden_cel_back(env, monkeypatch):
+    s, db = env
+    h = "0f0f0f0f0f0f0f0f"
+    db.run("UPDATE listings SET image = 'a.jpg', phash = ? WHERE id = 'yahoo:a2'", h)
+    db.run("UPDATE cels SET phash = ? WHERE id = 2", h)
+    sweep.backfill(db, _Says({"kind": "print"}), s, limit=3)
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 1
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("r.jpg", h))
+    relist = Raw(
+        "mercari:r2",
+        "Mercari",
+        "エヴァンゲリオン セル画 綾波レイ",
+        "https://example.invalid/r",
+        yen=9000,
+    )
+    sweep.ingest(db, s, _Says({"kind": "cel"}), [relist], 200.0, False)
+    assert db.one("SELECT cel_id FROM listings WHERE id = 'mercari:r2'")["cel_id"] == 2
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 0
