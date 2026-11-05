@@ -435,16 +435,16 @@ def test_a_kept_listing_is_asked_again_once_its_photos_arrive(env, monkeypatch):
         Raw("yahoo:a3", "Yahoo", "セル画", "https://example.invalid/x", yen=120000),  # not gathered
     ]
     sweep.ingest(db, s, _Seen(None), again, 200.0, False)
-    got = {r["id"]: (r["photos"], r["recheck"]) for r in db.all("SELECT * FROM listings")}
-    assert got["yahoo:a2"] == ('["seal.jpg"]', 1)
-    assert got["yahoo:a1"] == ("[]", 0)  # nothing more to see: no second call
-    assert got["yahoo:a3"] == (None, 0)  # tried again next sweep
-    assert got["yahoo:a4"] == (None, 0)  # p4 failed this time: the whole set waits for next sweep
+    rows = db.all("SELECT id, photos, recheck, photos_done FROM listings")
+    got = {r["id"]: (r["photos"], r["recheck"], r["photos_done"]) for r in rows}
+    assert got["yahoo:a2"] == ('["seal.jpg"]', 1, 1)
+    assert got["yahoo:a1"] == ("[]", 0, 1)  # nothing more to see: no second call
+    assert got["yahoo:a3"] == (None, 0, 0)  # gathered next sweep
+    assert got["yahoo:a4"] == ('["seal.jpg"]', 1, 0)  # seen now; p4 failed and is fetched again
     _fake_photos(monkeypatch, {"p2": "seal.jpg", "p4": "back.jpg"})
     sweep.ingest(db, s, _Seen(None), again[:1], 200.0, False)
-    assert db.one("SELECT photos FROM listings WHERE id = 'yahoo:a4'")["photos"] == (
-        '["seal.jpg", "back.jpg"]'
-    )
+    row = db.one("SELECT photos, photos_done FROM listings WHERE id = 'yahoo:a4'")
+    assert (row["photos"], row["photos_done"]) == ('["seal.jpg", "back.jpg"]', 1)
     llm = _Seen({"kind": "cel", "cel_club": True})
     assert sweep.backfill(db, llm, s) == 2
     assert sorted(llm.calls) == [["a.jpg", "seal.jpg"], ["seal.jpg", "back.jpg"]]  # no main photo

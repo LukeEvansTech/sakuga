@@ -138,7 +138,8 @@ MAX_PHOTO_PAGES = 40  # item pages opened per sweep for photos (Yahoo); the rest
 
 def gather_photos(page, db: DB, raws: list[Raw]) -> None:
     """Find the further photos of each listing the LLM will read: a new one past the title filter,
-    or a kept one whose further photos were never stored. raw.photos stays None where unknown."""
+    or a kept one whose further photos are not all stored yet. raw.photos stays None where unknown.
+    """
     # (last tried, listing): new ones first, then the longest waiting
     todo: list[tuple[str, Raw]] = []
     done: set[str] = set()
@@ -147,9 +148,9 @@ def gather_photos(page, db: DB, raws: list[Raw]) -> None:
         if raw.id in done:
             continue
         done.add(raw.id)
-        old = db.one("SELECT ok, photos, photos_tried FROM listings WHERE id = ?", raw.id)
+        old = db.one("SELECT ok, photos_done, photos_tried FROM listings WHERE id = ?", raw.id)
         if old:
-            if old["ok"] and old["photos"] is None:
+            if old["ok"] and not old["photos_done"]:
                 todo.append((old["photos_tried"] or "0", raw))
         elif filters.classify(
             raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction, raw.lang == "en"
@@ -174,7 +175,7 @@ def _download_more(raw: Raw, img_dir: Path) -> tuple[list[str], bool]:
     settled (fetched, or gone for good). An unsettled set is fetched again on a later sweep."""
     out, settled = [], raw.photos is not None
     for url in raw.photos or []:
-        name = images.download_more(url, img_dir, referer=raw.url)
+        name = images.download_more(url, img_dir, referer=raw.url, guessed=raw.source == "Mercari")
         if name is None:
             settled = False
         elif name and name not in out:
@@ -200,7 +201,9 @@ def ingest(
             continue
         yen = raw.yen or (round(raw.gbp * rate) if raw.gbp and rate else None)
         gbp = raw.gbp or (raw.yen / rate if raw.yen and rate else None)
-        old = db.one("SELECT ok, cel_id, yen, image, photos FROM listings WHERE id = ?", raw.id)
+        old = db.one(
+            "SELECT ok, cel_id, yen, image, photos, photos_done FROM listings WHERE id = ?", raw.id
+        )
         if (
             old
         ):  # already catalogued: the admission filters (a price cut below the floor) do not apply
@@ -232,16 +235,20 @@ def ingest(
                             old["cel_id"],
                         )
                         regroup(db, llm, s, raw, old["cel_id"], image, ph)
-            if old["ok"] and old["photos"] is None and raw.photos is not None:
+            if old["ok"] and not old["photos_done"] and raw.photos is not None:
                 more, settled = _download_more(raw, s.img_dir)
-                if settled:
-                    # The LLM judged it without these photos: ask again with them (a Cel Club seal).
-                    db.run(
-                        "UPDATE listings SET photos=?, recheck=? WHERE id=?",
-                        json.dumps(more),
-                        int(bool(more)),
-                        raw.id,
-                    )
+                had = json.loads(old["photos"] or "[]")
+                new = [f for f in more if f not in had]
+                # The LLM judged it without these photos: ask again with them (a Cel Club seal).
+                # The ones still missing are fetched again next sweep, and asked about when they come.
+                db.run(
+                    "UPDATE listings SET photos=?, photos_done=?,"
+                    " recheck = CASE WHEN ? THEN 1 ELSE recheck END WHERE id=?",
+                    json.dumps(had + new),
+                    int(settled),
+                    int(bool(new)),
+                    raw.id,
+                )
             if old["ok"] and old["cel_id"]:
                 kept += 1
                 db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, old["cel_id"])
@@ -312,8 +319,8 @@ def ingest(
                     )
         db.run(
             "INSERT INTO listings (id, source, cel_id, title, extra, url, img_url, image, phash, yen, gbp,"
-            " info, auction, franchise, kind, verdict, ok, reason, first_seen, last_seen, photos)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " info, auction, franchise, kind, verdict, ok, reason, first_seen, last_seen, photos,"
+            " photos_done) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             raw.id,
             raw.source,
             cel_id,
@@ -334,7 +341,8 @@ def ingest(
             k.reason,
             t,
             t,
-            json.dumps(more) if settled else None,  # NULL: fetched again, and asked again, later
+            json.dumps(more),
+            int(settled),  # 0: the rest are fetched again later, and the LLM asked again
         )
         if yen:
             db.run(

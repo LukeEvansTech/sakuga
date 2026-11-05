@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS listings (
     asked TEXT,
     photos TEXT,
     recheck INTEGER NOT NULL DEFAULT 0,
-    photos_tried TEXT
+    photos_tried TEXT,
+    photos_done INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS listings_cel ON listings (cel_id);
 CREATE TABLE IF NOT EXISTS prices (
@@ -120,12 +121,14 @@ class DB:
                 c.execute("ALTER TABLE cels ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0")
             if "asked" not in cols:  # when backfill last asked the LLM about this listing
                 c.execute("ALTER TABLE listings ADD COLUMN asked TEXT")
-            if "photos" not in cols:  # further photo files (JSON list); NULL until gathered
+            if "photos" not in cols:  # further photo files stored so far (JSON list)
                 c.execute("ALTER TABLE listings ADD COLUMN photos TEXT")
             if "recheck" not in cols:  # new photos arrived after the LLM's verdict: ask again
                 c.execute("ALTER TABLE listings ADD COLUMN recheck INTEGER NOT NULL DEFAULT 0")
             if "photos_tried" not in cols:  # when an item page was last opened for its photos
                 c.execute("ALTER TABLE listings ADD COLUMN photos_tried TEXT")
+            if "photos_done" not in cols:  # every further photo stored, or gone for good
+                c.execute("ALTER TABLE listings ADD COLUMN photos_done INTEGER NOT NULL DEFAULT 0")
             # A sweep cut off by a restart never finishes; mark it so pages stop saying "Sweeping".
             c.execute(
                 "UPDATE runs SET status = 'interrupted', finished = started WHERE status = 'running'"
