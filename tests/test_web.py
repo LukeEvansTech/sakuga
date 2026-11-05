@@ -7,6 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sakuga import config, notify, sweep
 from sakuga.db import DB
+from sakuga.llm import LLM
+from sakuga.sources import Raw
 from sakuga.web import create_app
 
 # Relative to now: retire() compares last_seen with the real clock.
@@ -148,3 +150,22 @@ def test_interrupted_run_is_closed_on_start(env):
     db.run("INSERT INTO runs (started, status) VALUES (?, 'running')", T)
     db2 = DB(s.db_path)
     assert db2.one("SELECT status FROM runs")["status"] == "interrupted"
+
+
+def test_late_photo_folds_duplicate_into_known_cel(env):
+    s, db = env
+    h = "0f0f0f0f0f0f0f0f"
+    db.run("UPDATE cels SET phash = ?, image = 'a.jpg' WHERE id = 1", h)
+    db.run("UPDATE listings SET phash = ? WHERE id = 'yahoo:a1'", h)
+    sweep.regroup(db, LLM("", "", "claude"), s, "yahoo:a2", 2, "b.jpg", h)
+    assert db.one("SELECT cel_id FROM listings WHERE id = 'yahoo:a2'")["cel_id"] == 1
+    assert db.one("SELECT id FROM cels WHERE id = 2") is None
+    sweep.regroup(db, LLM("", "", "claude"), s, "mercari:m3", 3, "c.jpg", h)
+    assert db.one("SELECT id FROM cels WHERE id = 3")  # two listings on cel 3: left alone
+
+
+def test_pound_prices_meet_the_minimum(env):
+    s, db = env
+    cheap = Raw("mercari:x1", "Mercari", "ポケモン セル画", "https://example.invalid/x", gbp=5.0)
+    got = sweep.ingest(db, s, LLM("", "", "claude"), [cheap], 200.0, False)
+    assert got["seen"] == set()  # ¥1,000 is under the ¥3,000 fixed-price floor

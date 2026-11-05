@@ -128,11 +128,12 @@ def ingest(
     for raw in raws:
         if raw.id in seen:
             continue
-        c = filters.classify(raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction)
+        yen = raw.yen or (round(raw.gbp * rate) if raw.gbp and rate else None)
+        # Converted first, so the minimum price applies to Mercari's pound-only prices too.
+        c = filters.classify(raw.title, raw.extra, yen, raw.cel_category, raw.auction)
         if not c:
             continue
         seen.add(raw.id)
-        yen = raw.yen or (round(raw.gbp * rate) if raw.gbp and rate else None)
         gbp = raw.gbp or (raw.yen / rate if raw.yen and rate else None)
         old = db.one("SELECT ok, cel_id, yen, image FROM listings WHERE id = ?", raw.id)
         if old:
@@ -162,6 +163,7 @@ def ingest(
                             ph,
                             old["cel_id"],
                         )
+                        regroup(db, llm, s, raw.id, old["cel_id"], image, ph)
             if old["ok"] and old["cel_id"]:
                 kept += 1
                 db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, old["cel_id"])
@@ -247,6 +249,35 @@ def ingest(
     return {"seen": seen, "kept": kept, "new_cels": new_cels}
 
 
+def regroup(
+    db: DB, llm: LLM, s: Settings, listing_id: str, cel_id: int, image: str, ph: str
+) -> None:
+    """A photo that arrived late may show a cel already catalogued: if this listing's cel holds
+    only this listing and has not been announced, fold it into the matching cel."""
+    cel = db.one("SELECT * FROM cels WHERE id = ?", cel_id)
+    n = db.one("SELECT COUNT(*) n FROM listings WHERE cel_id = ?", cel_id)
+    if not cel or not n or n["n"] != 1 or cel["digest_id"] or cel["instant_sent"]:
+        return
+    cands = [
+        catalog.Candidate(r["id"], r["phash"], r["franchise"], r["title_jp"])
+        for r in db.all(
+            "SELECT id, phash, franchise, title_jp FROM cels WHERE franchise = ? AND id != ?",
+            cel["franchise"],
+            cel_id,
+        )
+    ]
+    match = catalog.group(
+        ph, cel["franchise"], cands, _same_fn(db, llm, s.img_dir, listing_id, image)
+    )
+    if match is None:
+        return
+    with db.tx() as con:
+        con.execute("UPDATE listings SET cel_id = ? WHERE id = ?", (match, listing_id))
+        con.execute("UPDATE cels SET last_seen = ?, available = 1 WHERE id = ?", (now(), match))
+        con.execute("DELETE FROM cels WHERE id = ?", (cel_id,))
+    log.info("listing %s joined cel %d (its photo arrived late)", listing_id, match)
+
+
 def _json(v) -> str:
     return json.dumps(v, ensure_ascii=False) if v else ""
 
@@ -272,11 +303,14 @@ def _notes(v: dict) -> str:
 #   listing is checked on its own page and retires only when the page says it is sold or removed.
 READ_WHOLE = {"Mandarake", "Mandarake auction"}
 STALE_DAYS = 3
+# Yahoo auctions run up to seven days, so one can leave the search window and still be running.
+STALE_DAYS_BY_SOURCE = {"Yahoo": 8}
 MAX_CHECKS = 12
 
 
-def _cutoff() -> str:
-    t = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=STALE_DAYS)
+def _cutoff(source: str = "") -> str:
+    days = STALE_DAYS_BY_SOURCE.get(source, STALE_DAYS)
+    t = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
     return t.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -300,7 +334,7 @@ def retire(
     checked: dict[str, bool | None] | None = None,
 ) -> None:
     """Retire listings that are gone; never on a site whose search failed this sweep."""
-    cutoff, checked = _cutoff(), checked or {}
+    checked = checked or {}
     for r in db.all("SELECT id, source, url, last_seen FROM listings WHERE active = 1"):
         src = r["source"]
         if r["id"] in seen or src in failed:
@@ -315,7 +349,7 @@ def retire(
                 db.run("UPDATE listings SET last_seen = ? WHERE id = ?", now(), r["id"])
             gone = verdict is False
         else:
-            gone = r["last_seen"] < cutoff
+            gone = r["last_seen"] < _cutoff(src)
         if gone:
             db.run("UPDATE listings SET active = 0 WHERE id = ?", r["id"])
     db.run(
