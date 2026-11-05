@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+jinja2
+python-multipart
+playwright
+pillow
+numpy
+apprise
+croniter
