@@ -4,7 +4,6 @@ import io
 
 import numpy as np
 from PIL import Image, ImageDraw
-
 from sakuga.catalog import NEAR, Candidate, group, keep, title_sim
 from sakuga.images import distance, phash
 
@@ -59,7 +58,7 @@ def test_same_title_far_photo_goes_to_llm():
     asked = []
     far = f"{int(phash(drawing(1)), 16) ^ (2**40 - 1):016x}"
     t = "新世紀エヴァンゲリオン　綾波レイ　セル画　動画付き　劇場版"
-    group(phash(drawing(1)), "eva", [Candidate(5, far, "eva", t)], lambda c: asked.append(c), t)
+    group(phash(drawing(1)), "eva", [Candidate(5, far, "eva", t)], asked.append, t)
     assert asked == [5]
     assert title_sim(t, t) == 1.0 and title_sim(t, "ポケモン　ピカチュウ　セル画") < 0.3
 

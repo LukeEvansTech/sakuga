@@ -7,10 +7,11 @@ first pass; the LLM (llm.py) then looks at the photo of anything that passes.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 MIN_YEN = 3000  # fixed prices below this are prints, prizes or scraps; real auctions start at ¥1
 
-FRANCHISES = {
+FRANCHISES: dict[str, dict[str, Any]] = {
     "broly": {
         "label": "Broly",
         "jp": ["ブロリー"],
@@ -29,7 +30,16 @@ FRANCHISES = {
     },
     "eva": {
         "label": "Eva",
-        "jp": ["エヴァンゲリオン", "エヴァンゲリヲン", "ヱヴァンゲリヲン", "エヴァ", "渚カヲル", "綾波レイ", "初号機", "弐号機"],
+        "jp": [
+            "エヴァンゲリオン",
+            "エヴァンゲリヲン",
+            "ヱヴァンゲリヲン",
+            "エヴァ",
+            "渚カヲル",
+            "綾波レイ",
+            "初号機",
+            "弐号機",
+        ],
         "en": ["evangelion", "kaworu", "ayanami"],
         "buyee": ["エヴァンゲリオン", "エヴァ"],
         "mercari": ["エヴァンゲリオン セル画", "エヴァ 複製セル", "エヴァ セル画"],
@@ -51,10 +61,14 @@ JUNK = re.compile(
     r"付録|ZENBU|カタログ|フィルム|35mm|版画|ミストグラフ|キャラファイン|PSA|ブースター|メモリアル原画アート|テレカ|"
     r"テレホンカード|書籍|文庫|ムック|ポストカード|キーホルダー|缶バッジ|タペストリー|ジグソー|プライズ|景品|リペイント|カスタム|"
     r"ichiban\s*kuji|figure|\bcards?\b|poster|cel\s*club|cel-style|doujin|sticker|acrylic|printed",
-    re.I)
+    re.I,
+)
 REPRO = re.compile(r"複製|復刻|リプロ|reproduction|replica|duplicate", re.I)
 CEL = re.compile(r"セル|\bcels?\b", re.I)
-GENGA = re.compile(r"原画|動画|修正|レイアウト|genga|douga|key\s*frame|animation\s*drawing|original\s*drawing", re.I)
+GENGA = re.compile(
+    r"原画|動画|修正|レイアウト|genga|douga|key\s*frame|animation\s*drawing|original\s*drawing",
+    re.I,
+)
 # GAINAX's own limited reproduction cels (100 per cut, numbered, with certificate): wanted despite REPRO.
 GAINAX_LIMITED = re.compile(r"限定|/\s*100|ガイナックス|gainax|公式|シリアル", re.I)
 
@@ -76,8 +90,13 @@ def franchise_of(title: str, extra: str = "") -> str | None:
     return None
 
 
-def classify(title: str, extra: str = "", yen: int | None = None, in_cel_category: bool = False,
-             auction: bool = False) -> dict | None:
+def classify(
+    title: str,
+    extra: str = "",
+    yen: int | None = None,
+    in_cel_category: bool = False,
+    auction: bool = False,
+) -> dict | None:
     """Franchise and kind for a listing worth alerting on, or None.
 
     title is the Japanese title; extra is any translated text (Buyee), used for the junk and kind checks.
@@ -89,8 +108,13 @@ def classify(title: str, extra: str = "", yen: int | None = None, in_cel_categor
         return None
     if not auction and yen is not None and yen < MIN_YEN:
         return None
-    if key == "eva" and REPRO.search(text) and re.search(r"複製セル|reproduction cel", text, re.I) \
-            and GAINAX_LIMITED.search(text) and not re.search(r"セル倶楽部|セル画倶楽部|cel\s*club|景品|プライズ", text, re.I):
+    if (
+        key == "eva"
+        and REPRO.search(text)
+        and re.search(r"複製セル|reproduction cel", text, re.I)
+        and GAINAX_LIMITED.search(text)
+        and not re.search(r"セル倶楽部|セル画倶楽部|cel\s*club|景品|プライズ", text, re.I)
+    ):
         return {"franchise": key, "kind": "gainax-limited"}
     if JUNK.search(text) or REPRO.search(text):
         return None

@@ -145,7 +145,9 @@ def mercari(page, q: str) -> list[Raw]:
 
 
 def mandarake_shop(page) -> list[Raw]:
-    page.goto("https://order.mandarake.co.jp/order/?lang=ja", wait_until="domcontentloaded", timeout=60000)
+    page.goto(
+        "https://order.mandarake.co.jp/order/?lang=ja", wait_until="domcontentloaded", timeout=60000
+    )
     _load(
         page,
         "https://order.mandarake.co.jp/order/listPage/list?categoryCode=0701&soldOut=1"

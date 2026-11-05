@@ -74,9 +74,13 @@ def local_time(s: str | None, tz: str) -> str:
 
 def cel_view(db: DB, row) -> dict:
     """A cel with what its card needs: best current listing, every source, days on the market."""
-    listings = [dict(r) for r in db.all(
-        "SELECT * FROM listings WHERE cel_id = ? AND ok = 1 ORDER BY active DESC, yen", row["id"]
-    )]
+    listings = [
+        dict(r)
+        for r in db.all(
+            "SELECT * FROM listings WHERE cel_id = ? AND ok = 1 ORDER BY active DESC, yen",
+            row["id"],
+        )
+    ]
     live = [x for x in listings if x["active"]]
     best = live[0] if live else (listings[0] if listings else {})
     c = dict(row)
@@ -86,7 +90,7 @@ def cel_view(db: DB, row) -> dict:
         sources=sorted({x["source"] for x in live}),
         days=days_between(row["first_seen"], None if row["available"] else row["last_seen"]),
         label=FRANCHISES.get(row["franchise"], {}).get("label", row["franchise"]),
-        title=row["title_en"] or row["title_jp"][:80],
+        title=row["title_en"] or row["title_jp"],
     )
     return c
 
@@ -126,16 +130,32 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
         last = db.one("SELECT * FROM digests ORDER BY id DESC LIMIT 1")
         sent = []
         if last:
-            sent = [cel_view(db, r) for r in db.all(
-                "SELECT * FROM cels WHERE digest_id = ? ORDER BY first_seen DESC", last["id"]
-            )]
+            sent = [
+                cel_view(db, r)
+                for r in db.all(
+                    "SELECT * FROM cels WHERE digest_id = ? ORDER BY first_seen DESC", last["id"]
+                )
+            ]
         total = db.one("SELECT COUNT(*) n FROM cels WHERE available = 1")
-        return page(request, "today.html", "today", fresh=fresh, sent=sent, digest=last,
-                    available=total["n"] if total else 0)
+        return page(
+            request,
+            "today.html",
+            "today",
+            fresh=fresh,
+            sent=sent,
+            digest=last,
+            available=total["n"] if total else 0,
+        )
 
     @app.get("/catalogue", response_class=HTMLResponse)
-    def catalogue(request: Request, franchise: str = "", source: str = "", kind: str = "",
-                  sort: str = "newest", show: str = "available"):
+    def catalogue(
+        request: Request,
+        franchise: str = "",
+        source: str = "",
+        kind: str = "",
+        sort: str = "newest",
+        show: str = "available",
+    ):
         where, args = ["1=1"], []
         if franchise in FRANCHISES:
             where.append("c.franchise = ?")
@@ -148,8 +168,10 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
         elif show == "gone":
             where.append("c.available = 0")
         if source in SOURCES:
-            where.append("EXISTS (SELECT 1 FROM listings l WHERE l.cel_id = c.id AND l.ok = 1"
-                         " AND l.source = ?" + (" AND l.active = 1" if show == "available" else "") + ")")
+            where.append(
+                "EXISTS (SELECT 1 FROM listings l WHERE l.cel_id = c.id AND l.ok = 1"
+                " AND l.source = ?" + (" AND l.active = 1" if show == "available" else "") + ")"
+            )
             args.append(source)
         price = "(SELECT MIN(l.yen) FROM listings l WHERE l.cel_id = c.id AND l.ok = 1 AND l.active = 1)"
         order = {
@@ -158,13 +180,27 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
             "price": f"{price} IS NULL, {price} ASC",
             "price_desc": f"{price} DESC",
         }.get(sort, "c.first_seen DESC")
-        rows = db.all(f"SELECT c.* FROM cels c WHERE {' AND '.join(where)} ORDER BY {order}", *args)  # nosec B608
+        rows = db.all(
+            f"SELECT c.* FROM cels c WHERE {' AND '.join(where)} ORDER BY {order}", *args
+        )  # nosec B608
         cels = [cel_view(db, r) for r in rows]
-        counts = {r["franchise"]: r["n"] for r in db.all(
-            "SELECT franchise, COUNT(*) n FROM cels WHERE available = 1 GROUP BY franchise")}
-        return page(request, "catalogue.html", "catalogue", cels=cels, counts=counts,
-                    f={"franchise": franchise, "source": source, "kind": kind, "sort": sort, "show": show},
-                    sources=SOURCES, kinds=KINDS, sorts=SORTS)
+        counts = {
+            r["franchise"]: r["n"]
+            for r in db.all(
+                "SELECT franchise, COUNT(*) n FROM cels WHERE available = 1 GROUP BY franchise"
+            )
+        }
+        return page(
+            request,
+            "catalogue.html",
+            "catalogue",
+            cels=cels,
+            counts=counts,
+            f={"franchise": franchise, "source": source, "kind": kind, "sort": sort, "show": show},
+            sources=SOURCES,
+            kinds=KINDS,
+            sorts=SORTS,
+        )
 
     @app.get("/cel/{cel_id}", response_class=HTMLResponse)
     def cel(request: Request, cel_id: int):
@@ -174,8 +210,12 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
         c = cel_view(db, row)
         history = {}
         for x in c["listings"]:
-            history[x["id"]] = [dict(p) for p in db.all(
-                "SELECT seen, yen FROM prices WHERE listing_id = ? ORDER BY seen", x["id"])]
+            history[x["id"]] = [
+                dict(p)
+                for p in db.all(
+                    "SELECT seen, yen FROM prices WHERE listing_id = ? ORDER BY seen", x["id"]
+                )
+            ]
             try:
                 x["v"] = json.loads(x["verdict"]) if x["verdict"] else {}
             except json.JSONDecodeError:
@@ -190,28 +230,38 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
     def log_page(request: Request):
         runs = [dict(r) for r in db.all("SELECT * FROM runs ORDER BY id DESC LIMIT 60")]
         for r in runs:
-            r["sources"] = [dict(x) for x in db.all(
-                "SELECT * FROM run_sources WHERE run_id = ? ORDER BY name", r["id"])]
+            r["sources"] = [
+                dict(x)
+                for x in db.all("SELECT * FROM run_sources WHERE run_id = ? ORDER BY name", r["id"])
+            ]
             r["failed"] = [x for x in r["sources"] if x["count"] is None]
-            r["seconds"] = (parse_ts(r["finished"]) - parse_ts(r["started"])).seconds if r["finished"] else None
+            end, start = parse_ts(r["finished"]), parse_ts(r["started"])
+            r["seconds"] = (end - start).seconds if end and start else None
         digests = db.all("SELECT * FROM digests ORDER BY id DESC LIMIT 14")
-        spend = db.one("SELECT COALESCE(SUM(llm_cost),0) c, COALESCE(SUM(llm_calls),0) n FROM runs"
-                       " WHERE started >= datetime('now','-30 days')")
+        spend = db.one(
+            "SELECT COALESCE(SUM(llm_cost),0) c, COALESCE(SUM(llm_calls),0) n FROM runs"
+            " WHERE started >= datetime('now','-30 days')"
+        )
         return page(request, "log.html", "log", runs=runs, digests=digests, spend=spend)
 
     @app.post("/sweep")
     def sweep_now():
         if sweep.LOCK.locked():
             return RedirectResponse("/log", status_code=303)
-        threading.Thread(target=sweep.run, args=(db, s), kwargs={"trigger": "manual"}, daemon=True).start()
+        threading.Thread(
+            target=sweep.run, args=(db, s), kwargs={"trigger": "manual"}, daemon=True
+        ).start()
         return RedirectResponse("/log", status_code=303)
 
     @app.get("/img/{name}")
     def img(name: str):
         if not SAFE_NAME.match(name) or not (s.img_dir / name).exists():
             raise HTTPException(404, "no such image")
-        return FileResponse(s.img_dir / name, media_type="image/jpeg",
-                            headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        return FileResponse(
+            s.img_dir / name,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     @app.get("/health")
     def health():
@@ -220,8 +270,10 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
     @app.get("/metrics", response_class=PlainTextResponse)
     def metrics():
         """A sweep counts only when it read something; a run that searched nothing is not a success."""
-        ok = db.one("SELECT finished FROM runs WHERE status IN ('success','partial') AND listings > 0"
-                    " ORDER BY id DESC LIMIT 1")
+        ok = db.one(
+            "SELECT finished FROM runs WHERE status IN ('success','partial') AND listings > 0"
+            " ORDER BY id DESC LIMIT 1"
+        )
         last = db.one("SELECT status FROM runs WHERE status != 'running' ORDER BY id DESC LIMIT 1")
         cels = db.one("SELECT COUNT(*) n, COALESCE(SUM(available),0) a FROM cels")
         t = parse_ts(ok["finished"]) if ok else None

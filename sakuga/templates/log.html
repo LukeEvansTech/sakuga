@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Log · Sakuga{% endblock %}
+{% block main %}
+<section class="lead log-lead">
+  <dl class="facts">
+    <div><dt>Last sweep</dt><dd>{% if last_run %}{{ last_run.status | capitalize }}, {{ last_run.finished | local }}{% else %}None yet{% endif %}</dd></div>
+    <div><dt>LLM, last 30 days</dt><dd class="num">{{ spend.n }} calls · ${{ '%.2f' % spend.c }}</dd></div>
+    <div><dt>Schedule</dt><dd>Every 30 min · digest 08:00</dd></div>
+  </dl>
+  <form method="post" action="/sweep"><button type="submit" {{ 'disabled' if running }}>{{ 'Sweeping…' if running else 'Sweep now' }}</button></form>
+</section>
+
+<h2 class="rule-head">Sweeps <span>{{ runs | length }}</span></h2>
+{% if runs %}
+<div class="table-wrap">
+<table class="runs">
+  <thead><tr><th scope="col">Started</th><th scope="col">Result</th><th scope="col" class="r">Listings</th><th scope="col" class="r">Kept</th><th scope="col" class="r">New</th><th scope="col" class="r">LLM</th><th scope="col" class="r">Time</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+  <tr class="st-{{ r.status }}">
+    <td>{{ r.started | local }}<span class="trig">{{ r.trigger }}</span></td>
+    <td>{{ r.status | capitalize }}{% if r.failed %}<span class="fail-list">{% for x in r.failed %}{{ x.name }}{{ ', ' if not loop.last }}{% endfor %} failed</span>{% endif %}{% if r.error %}<span class="fail-list">{{ r.error }}</span>{% endif %}</td>
+    <td class="r num">{{ r.listings }}</td>
+    <td class="r num">{{ r.kept }}</td>
+    <td class="r num">{{ r.new_cels }}</td>
+    <td class="r num">{{ r.llm_calls }}</td>
+    <td class="r num">{% if r.seconds is not none %}{{ r.seconds // 60 }}:{{ '%02d' % (r.seconds % 60) }}{% else %}–{% endif %}</td>
+  </tr>
+  <tr class="src-row"><td colspan="7">
+    <details><summary>{{ r.sources | length }} searches</summary>
+      <ul class="srcs">{% for x in r.sources %}<li class="{{ 'bad' if x.count is none }}"><span>{{ x.name }}</span><span class="num">{% if x.count is none %}failed{% else %}{{ x.count }}{% endif %} · {{ x.seconds }}s</span>{% if x.error %}<em>{{ x.error }}</em>{% endif %}</li>{% endfor %}</ul>
+    </details>
+  </td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty"><p>No sweeps yet. The first runs within 30 minutes of starting, or press Sweep now.</p></div>
+{% endif %}
+
+<h2 class="rule-head">Digests <span>{{ digests | length }}</span></h2>
+{% if digests %}
+<ul class="digests">{% for d in digests %}<li><span>{{ d.created | local }}</span><span class="num">{{ d.cels }} cel{{ '' if d.cels == 1 else 's' }} · {{ d.result }}</span></li>{% endfor %}</ul>
+{% else %}<div class="empty"><p>No digest sent yet. The first goes at 08:00 if anything new has appeared.</p></div>{% endif %}
+{% endblock %}

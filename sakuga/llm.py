@@ -121,7 +121,14 @@ class LLM:
         if image and image.exists():
             content.append(_image_part(image))
         v = self._ask(content)
-        if not v or v.get("kind") not in {"cel", "genga", "douga", "reproduction", "print", "not_art"}:
+        if not v or v.get("kind") not in {
+            "cel",
+            "genga",
+            "douga",
+            "reproduction",
+            "print",
+            "not_art",
+        }:
             return None
         return v
 

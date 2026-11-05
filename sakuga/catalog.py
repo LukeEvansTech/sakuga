@@ -87,7 +87,9 @@ def group(
         return scored[0][1]
     asks = [cel_id for d, cel_id, _ in scored if NEAR < d <= MAYBE]
     if title:
-        asks += [cel_id for d, cel_id, t in scored if d > MAYBE and title_sim(title, t) >= TITLE_SIM]
+        asks += [
+            cel_id for d, cel_id, t in scored if d > MAYBE and title_sim(title, t) >= TITLE_SIM
+        ]
     for cel_id in asks[:MAX_ASKS]:
         if same and same(cel_id):
             return cel_id

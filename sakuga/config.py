@@ -14,7 +14,9 @@ def _env(name: str, default: str) -> str:
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path = field(default_factory=lambda: Path(_env("SAKUGA_DATA", "data")))
-    public_url: str = field(default_factory=lambda: os.environ.get("SAKUGA_PUBLIC_URL", "").rstrip("/"))
+    public_url: str = field(
+        default_factory=lambda: os.environ.get("SAKUGA_PUBLIC_URL", "").rstrip("/")
+    )
     # Sweeps: every 30 minutes. Digest: once a day, of the cels first seen since the last one.
     schedule: str = field(default_factory=lambda: _env("SAKUGA_SCHEDULE", "*/30 * * * *"))
     digest_schedule: str = field(default_factory=lambda: _env("SAKUGA_DIGEST", "0 8 * * *"))

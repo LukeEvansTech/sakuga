@@ -9,3 +9,4 @@ __pycache__/
 .DS_Store
 .impeccable/mocks/
 .impeccable/decision-payload.json
+.impeccable/review/
