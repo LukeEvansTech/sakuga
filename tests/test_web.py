@@ -269,3 +269,12 @@ def test_accepted_relist_brings_a_hidden_cel_back(env, monkeypatch):
     sweep.ingest(db, s, _Says({"kind": "cel"}), [relist], 200.0, False)
     assert db.one("SELECT cel_id FROM listings WHERE id = 'mercari:r2'")["cel_id"] == 2
     assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 0
+
+
+def test_hidden_state_is_derived_from_sightings(env):
+    _, db = env
+    db.run("UPDATE listings SET ok = 0, verdict = '{}' WHERE id = 'yahoo:a1'")
+    db.run("UPDATE cels SET rejected = 1 WHERE id = 3")  # stale: its listings are accepted
+    sweep.reconcile_hidden(db)
+    got = {r["id"]: r["rejected"] for r in db.all("SELECT id, rejected FROM cels")}
+    assert got == {1: 1, 2: 0, 3: 0}

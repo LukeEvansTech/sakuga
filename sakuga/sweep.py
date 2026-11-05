@@ -206,8 +206,16 @@ def ingest(
                 )
                 new_cels.append(cel_id)
             else:
-                # An accepted listing joining a cel hidden on a second look brings it back.
-                db.run("UPDATE cels SET last_seen=?, available=1, rejected=0 WHERE id=?", t, cel_id)
+                # An accepted listing joining a cel hidden on a second look brings it back, as it now reads.
+                db.run(
+                    "UPDATE cels SET last_seen=?, available=1,"
+                    " kind = CASE WHEN rejected THEN ? ELSE kind END,"
+                    " gainax = CASE WHEN rejected THEN ? ELSE gainax END, rejected=0 WHERE id=?",
+                    t,
+                    k.kind,
+                    int(k.gainax),
+                    cel_id,
+                )
                 if image:
                     db.run(
                         "UPDATE cels SET image=?, phash=? WHERE id=? AND image=''",
@@ -260,6 +268,18 @@ def rejected_twin(db: DB, franchise: str, ph: str):
         franchise,
     )
     return next((r for r in rows if images.distance(ph, r["phash"]) <= catalog.NEAR), None)
+
+
+def reconcile_hidden(db: DB) -> None:
+    """A cel is hidden exactly when it has sightings and the LLM rejected all of them.
+
+    Derived once per sweep, so every path that moves listings (relists, late-photo regrouping) agrees.
+    """
+    with NOTIFY_LOCK:
+        db.run(
+            "UPDATE cels SET rejected = (EXISTS (SELECT 1 FROM listings l WHERE l.cel_id = cels.id)"
+            " AND NOT EXISTS (SELECT 1 FROM listings l WHERE l.cel_id = cels.id AND l.ok = 1))"
+        )
 
 
 MAX_BACKFILL = 10
@@ -512,6 +532,7 @@ def run(
         baseline = not db.get("baselined", False)
         got = ingest(db, s, model, raws, rate, baseline)
         backfill(db, model, s)
+        reconcile_hidden(db)
         retire(db, got["seen"], failed, partial, checked)
         alerts = instant(db, s) if notify_on else []
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")
