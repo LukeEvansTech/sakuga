@@ -278,3 +278,101 @@ def test_hidden_state_is_derived_from_sightings(env):
     sweep.reconcile_hidden(db)
     got = {r["id"]: r["rejected"] for r in db.all("SELECT id, rejected FROM cels")}
     assert got == {1: 1, 2: 0, 3: 0}
+
+
+def _fake_collect(rounds):
+    """collect() as a sweep sees it: every search recorded as read, and these listings."""
+
+    def collect(s, db, run_id, _check=None):
+        for name, _, _ in sweep.search_jobs(s):
+            db.run("INSERT INTO run_sources (run_id, name, count) VALUES (?, ?, 0)", run_id, name)
+        return next(rounds), set(), set(), {}
+
+    return collect
+
+
+def test_a_new_source_starts_with_a_quiet_read(env, monkeypatch):
+    s, db = env
+    s = dataclasses.replace(s, ebay_client_id="id", ebay_client_secret="secret")
+    db.put("baselined", True)  # an existing catalogue, from before eBay
+    first = Raw(
+        "ebay:1",
+        "eBay",
+        "Evangelion Rei production cel",
+        "https://example.invalid/e",
+        gbp=100.0,
+        lang="en",
+    )
+    later = Raw(
+        "ebay:2",
+        "eBay",
+        "Evangelion Asuka production cel",
+        "https://example.invalid/f",
+        gbp=100.0,
+        lang="en",
+    )
+    ys = Raw(
+        "yahoo:n1",
+        "Yahoo",
+        "エヴァンゲリオン セル画 アスカ",
+        "https://example.invalid/y",
+        yen=9000,
+        auction=True,
+    )
+    monkeypatch.setattr(sweep, "collect", _fake_collect(iter([[first, ys], [later]])))
+    monkeypatch.setattr(sweep, "to_check", lambda db: [])
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("", ""))
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    base = {
+        r["title_jp"][:3]: r["baseline"]
+        for r in db.all("SELECT title_jp, baseline FROM cels WHERE id > 3")
+    }
+    assert base == {"Eva": 1, "エヴァ": 0}  # eBay's first read is quiet; Yahoo's news is not
+    assert "eBay" in db.get("baselined_sources", [])
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert db.one("SELECT baseline FROM cels WHERE title_jp LIKE 'Evangelion A%'")["baseline"] == 0
+
+
+def test_an_empty_first_read_still_baselines(env, monkeypatch):
+    s, db = env
+    s = dataclasses.replace(s, ebay_client_id="id", ebay_client_secret="secret")
+    db.put("baselined", True)
+    monkeypatch.setattr(sweep, "collect", _fake_collect(iter([[]])))
+    monkeypatch.setattr(sweep, "to_check", lambda db: [])
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert "eBay" in db.get("baselined_sources", [])
+
+
+def test_unsearched_source_keeps_its_listings(env, monkeypatch):
+    s, db = env  # no eBay keys: eBay is not searched this sweep
+    db.put("baselined", True)
+    db.run(
+        "INSERT INTO listings (id, source, cel_id, title, url, franchise, kind, first_seen, last_seen)"
+        " VALUES ('ebay:9', 'eBay', 1, 'Evangelion cel', 'https://example.invalid/e', 'eva', 'cel', ?, ?)",
+        T,
+        T,
+    )
+    monkeypatch.setattr(sweep, "collect", _fake_collect(iter([[]])))
+    monkeypatch.setattr(sweep, "to_check", lambda db: [])
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert db.one("SELECT active FROM listings WHERE id = 'ebay:9'")["active"] == 1
+
+
+def test_one_failed_search_does_not_silence_a_source(env, monkeypatch):
+    s, db = env  # a fresh catalogue whose first sweep loses one Yahoo search
+
+    def collect(s, db, run_id, _check=None):
+        for i, (name, _, _) in enumerate(sweep.search_jobs(s)):
+            db.run(
+                "INSERT INTO run_sources (run_id, name, count) VALUES (?, ?, ?)",
+                run_id,
+                name,
+                None if i == 0 else 0,
+            )
+        return [], {"Yahoo"}, set(), {}
+
+    monkeypatch.setattr(sweep, "collect", collect)
+    monkeypatch.setattr(sweep, "to_check", lambda db: [])
+    db.run("DELETE FROM kv")
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert "Yahoo" in db.get("baselined_sources", [])

@@ -68,6 +68,7 @@ class Raw:
     info: str = ""
     auction: bool = False
     cel_category: bool = False
+    lang: str = "ja"  # "en" where the title is English (eBay)
     meta: dict = field(default_factory=dict)
 
 

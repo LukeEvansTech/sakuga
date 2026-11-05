@@ -26,6 +26,14 @@ class Settings:
     llm_url: str = field(default_factory=lambda: os.environ.get("SAKUGA_LLM_URL", "").rstrip("/"))
     llm_key: str = field(default_factory=lambda: os.environ.get("SAKUGA_LLM_KEY", ""))
     llm_model: str = field(default_factory=lambda: _env("SAKUGA_LLM_MODEL", "claude"))
+    # eBay Browse API app keys; without them eBay is not searched.
+    ebay_client_id: str = field(default_factory=lambda: os.environ.get("EBAY_CLIENT_ID", ""))
+    ebay_client_secret: str = field(
+        default_factory=lambda: os.environ.get("EBAY_CLIENT_SECRET", "")
+    )
+    ebay_marketplace: str = field(
+        default_factory=lambda: _env("SAKUGA_EBAY_MARKETPLACE", "EBAY_GB")
+    )
     tries: int = field(default_factory=lambda: int(_env("SAKUGA_TRIES", "3")))
     headless: bool = field(default_factory=lambda: os.environ.get("SAKUGA_HEADLESS", "1") != "0")
     version: str = field(default_factory=lambda: _env("APP_VERSION", "0.0.0-dev"))

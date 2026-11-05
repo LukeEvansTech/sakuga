@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import catalog, filters, images, notify
+from . import catalog, ebay, filters, images, notify
 from .config import Settings
 from .db import DB
 from .llm import LLM
@@ -28,6 +28,15 @@ NOTIFY_LOCK = threading.Lock()
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def search_jobs(s: Settings) -> list:
+    """Every search this sweep runs: the browser sites, and eBay when its keys are set."""
+    if not (s.ebay_client_id and s.ebay_client_secret):
+        return jobs()
+    return jobs() + ebay.jobs(
+        ebay.Client(s.ebay_client_id, s.ebay_client_secret, s.ebay_marketplace)
+    )
 
 
 def collect(
@@ -48,7 +57,7 @@ def collect(
                 locale="ja-JP", user_agent=UA, viewport={"width": 1366, "height": 900}
             )
             page = ctx.new_page()
-            for name, family, fn in jobs():
+            for name, family, fn in search_jobs(s):
                 started, got, err = time.monotonic(), None, ""
                 for attempt in range(1, s.tries + 1):
                     try:
@@ -118,8 +127,19 @@ def _same_fn(db: DB, llm: LLM, img_dir: Path, listing_id: str, image: str):
     return same
 
 
+# The sources of the first release: a catalogue baselined before baselined_sources existed had read them.
+FIRST_SOURCES = ("Yahoo", "Mercari", "Mandarake", "Mandarake auction")
+ALL_SOURCES = (*FIRST_SOURCES, "eBay")
+
+
 def ingest(
-    db: DB, s: Settings, llm: LLM, raws: list[Raw], rate: float | None, baseline: bool
+    db: DB,
+    s: Settings,
+    llm: LLM,
+    raws: list[Raw],
+    rate: float | None,
+    baseline: bool,
+    quiet: frozenset[str] | set[str] = frozenset(),
 ) -> dict:
     """Store and catalogue one sweep's listings. Returns counts and the new cel ids."""
     t = now()
@@ -168,7 +188,9 @@ def ingest(
             continue
 
         # Converted first, so the minimum price applies to Mercari's pound-only prices too.
-        c = filters.classify(raw.title, raw.extra, yen, raw.cel_category, raw.auction)
+        c = filters.classify(
+            raw.title, raw.extra, yen, raw.cel_category, raw.auction, english=raw.lang == "en"
+        )
         if not c:
             continue
         seen.add(raw.id)
@@ -200,11 +222,12 @@ def ingest(
                     image,
                     ph,
                     int(k.gainax),
-                    int(baseline),
+                    int(baseline or raw.source in quiet),
                     t,
                     t,
                 )
-                new_cels.append(cel_id)
+                if not (baseline or raw.source in quiet):
+                    new_cels.append(cel_id)
             else:
                 # An accepted listing joining a cel hidden on a second look brings it back, as it now reads.
                 db.run(
@@ -411,7 +434,8 @@ def _notes(v: dict) -> str:
 #   a new ID, so STALE_DAYS unseen means gone.
 # - Mercari is fixed price and can sit unsold for months outside the search window, so a stale
 #   listing is checked on its own page and retires only when the page says it is sold or removed.
-READ_WHOLE = {"Mandarake", "Mandarake auction"}
+# Searches that return every match (eBay: each under one page), so absence means the listing ended.
+READ_WHOLE = {"Mandarake", "Mandarake auction", "eBay"}
 STALE_DAYS = 3
 # Yahoo auctions run up to seven days, so one can leave the search window and still be running.
 # A Mandarake auction lot beyond a full 240-lot page is judged the same way (they end too).
@@ -452,8 +476,8 @@ def retire(
             continue
         if src in READ_WHOLE and src not in partial:
             gone = True
-        elif src == "Mandarake":
-            gone = False  # a truncated shop read proves nothing about what it left out
+        elif src in ("Mandarake", "eBay"):
+            gone = False  # a truncated read proves nothing about what it left out
         elif src == "Mercari":
             verdict = checked.get(r["url"])
             if r["url"] in checked:
@@ -530,14 +554,32 @@ def run(
         if rate:
             db.put("yen_per_gbp", rate)
         baseline = not db.get("baselined", False)
-        got = ingest(db, s, model, raws, rate, baseline)
+        # A source added later gets its own quiet first read, as the whole catalogue did.
+        families = {family for _, family, _ in search_jobs(s)}
+        known = db.get("baselined_sources", None)
+        if known is None:
+            known = list(FIRST_SOURCES) if not baseline else []
+        quiet = families - set(known)
+        got = ingest(db, s, model, raws, rate, baseline, quiet)
         backfill(db, model, s)
         reconcile_hidden(db)
-        retire(db, got["seen"], failed, partial, checked)
+        # A source not searched at all this sweep (eBay without keys) proves nothing about its listings.
+        unsearched = set(ALL_SOURCES) - families
+        retire(db, got["seen"], failed | unsearched, partial, checked)
         alerts = instant(db, s) if notify_on else []
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")
         if baseline and ok_jobs:
             db.put("baselined", True)
+        # As the whole catalogue always has: a source is baselined by its first sweep with any read.
+        read_ok = {
+            r["name"]
+            for r in db.all(
+                "SELECT name FROM run_sources WHERE run_id = ? AND count IS NOT NULL", run_id
+            )
+        }
+        done = {family for name, family, _ in search_jobs(s) if name in read_ok} & quiet
+        if done or db.get("baselined_sources", None) is None:
+            db.put("baselined_sources", sorted(set(known) | done))
         db.run(
             "UPDATE runs SET finished=?, status=?, listings=?, kept=?, new_cels=?, llm_calls=?, llm_cost=?,"
             " alerts=? WHERE id=?",
@@ -545,7 +587,7 @@ def run(
             status,
             len(raws),
             got["kept"],
-            0 if baseline else len(got["new_cels"]),
+            len(got["new_cels"]),
             model.usage.calls,
             round(model.usage.cost, 4),
             "; ".join(alerts),

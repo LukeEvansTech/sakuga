@@ -1,5 +1,5 @@
 {% macro code(c) -%}
-{{ {'Yahoo': 'Y', 'Mercari': 'M', 'Mandarake': 'S', 'Mandarake auction': 'A'}.get(c.best.source, '–') }}-{{ '%04d' % c.id }}
+{{ {'Yahoo': 'Y', 'Mercari': 'M', 'Mandarake': 'S', 'Mandarake auction': 'A', 'eBay': 'E'}.get(c.best.source, '–') }}-{{ '%04d' % c.id }}
 {%- endmacro %}
 
 {% macro cell(c, new=false) -%}

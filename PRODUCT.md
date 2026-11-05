@@ -15,7 +15,7 @@ occasional.
 
 ## Product Purpose
 
-Sakuga watches Yahoo Auctions (through Buyee), Mercari and Mandarake for production cels of the
+Sakuga watches Yahoo Auctions (through Buyee), Mercari, Mandarake and eBay for production cels of the
 wanted franchises, keeps a catalogue of every cel seen, and sends Luke one message a day about the cels
 never seen before. Success: no cel worth chasing is missed, and none is announced twice.
 
@@ -28,7 +28,7 @@ it once. Marketplace saved searches alert on every relist.
 ## Operating Context
 
 - A cel is judged first by the artwork: which character, which scene, episode and cut.
-- Buying happens elsewhere: Buyee for Yahoo and Mercari, Mandarake directly.
+- Buying happens elsewhere: Buyee for Yahoo and Mercari, Mandarake and eBay directly.
 - Prices are in yen with a pound estimate; Mercari shows pounds to UK visitors.
 - Single user on the home network; installed to the phone's home screen.
 
