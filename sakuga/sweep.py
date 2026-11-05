@@ -246,6 +246,62 @@ def ingest(
     return {"seen": seen, "kept": kept, "new_cels": new_cels}
 
 
+MAX_BACKFILL = 10
+
+
+def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
+    """Ask the LLM again about kept listings it never answered for (a timeout, a cut-off reply).
+
+    It may only narrow, as on first sight: a Cel Club cel, print or drawing leaves the catalogue,
+    and a cel left with no kept listing goes with it. Returns the number answered.
+    """
+    rows = db.all(
+        "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.franchise, l.cel_id, c.gainax"
+        " FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
+        " WHERE l.ok = 1 AND l.verdict = '' AND l.image != '' AND l.active = 1"
+        " ORDER BY l.first_seen DESC LIMIT ?",
+        limit,
+    )
+    answered = 0
+    for r in rows:
+        verdict = llm.classify(
+            r["title"], r["extra"], price_text(r["yen"], r["gbp"]), s.img_dir / r["image"]
+        )
+        if not verdict:
+            continue
+        answered += 1
+        k = catalog.keep(r["franchise"], "gainax-limited" if r["gainax"] else "cel", verdict)
+        with NOTIFY_LOCK:
+            if not k.ok:
+                db.run(
+                    "UPDATE listings SET verdict=?, ok=0, reason=?, kind=?, cel_id=NULL WHERE id=?",
+                    _json(verdict),
+                    k.reason,
+                    k.kind,
+                    r["id"],
+                )
+                if r["cel_id"] and not db.one(
+                    "SELECT 1 FROM listings WHERE cel_id = ? AND ok = 1", r["cel_id"]
+                ):
+                    db.run("DELETE FROM cels WHERE id = ?", r["cel_id"])
+                log.info("listing %s dropped on a second look: %s", r["id"], k.reason)
+                continue
+            db.run(
+                "UPDATE listings SET verdict=?, kind=? WHERE id=?", _json(verdict), k.kind, r["id"]
+            )
+            if r["cel_id"]:
+                db.run(
+                    "UPDATE cels SET title_en = CASE WHEN title_en = '' THEN ? ELSE title_en END,"
+                    " notes = CASE WHEN notes = '' THEN ? ELSE notes END,"
+                    " gainax = gainax AND ? WHERE id = ?",
+                    verdict.get("title_en", ""),
+                    _notes(verdict),
+                    int(k.gainax),
+                    r["cel_id"],
+                )
+    return answered
+
+
 def candidates(db: DB, franchise: str, exclude: int = 0) -> list[catalog.Candidate]:
     """Every known photo of every cel in the franchise: each cel's own, and each of its listings'
     (a relist may reuse any photo the cel was ever shown with, under any title)."""
@@ -433,6 +489,7 @@ def run(
             db.put("yen_per_gbp", rate)
         baseline = not db.get("baselined", False)
         got = ingest(db, s, model, raws, rate, baseline)
+        backfill(db, model, s)
         retire(db, got["seen"], failed, partial, checked)
         alerts = instant(db, s) if notify_on else []
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")

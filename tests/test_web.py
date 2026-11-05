@@ -185,3 +185,28 @@ def test_known_listing_cut_below_the_floor_stays(env):
     got = sweep.ingest(db, s, LLM("", "", "claude"), [cut], 200.0, False)
     assert got["seen"] == {"yahoo:a2"}
     assert db.one("SELECT yen FROM listings WHERE id = 'yahoo:a2'")["yen"] == 2500
+
+
+class _Says(LLM):
+    def __init__(self, verdict):
+        super().__init__("", "", "claude")
+        self.verdict = verdict
+
+    def classify(self, title, extra, price, image):
+        return self.verdict
+
+
+def test_backfill_drops_cel_club_and_fills_titles(env):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg' WHERE id IN ('yahoo:a1', 'yahoo:a2')")
+    db.run("UPDATE listings SET first_seen = '2099-01-01 00:00:00' WHERE id = 'yahoo:a2'")
+    club = _Says({"kind": "cel", "cel_club": True})
+    assert sweep.backfill(db, club, s, limit=1) == 1  # newest first: yahoo:a2
+    gone = db.one("SELECT ok, reason, cel_id FROM listings WHERE id = 'yahoo:a2'")
+    assert (gone["ok"], gone["reason"], gone["cel_id"]) == (0, "LLM: Cel Club", None)
+    assert db.one("SELECT id FROM cels WHERE id = 2") is None  # its only listing went
+    named = _Says({"kind": "cel", "title_en": "Rei in the entry plug", "notes": "no douga"})
+    assert sweep.backfill(db, named, s) == 1  # yahoo:a1; answered listings are not asked again
+    assert sweep.backfill(db, named, s) == 0
+    cel = db.one("SELECT title_en, notes FROM cels WHERE id = 1")
+    assert (cel["title_en"], cel["notes"]) == ("Rei Ayanami 1", "no douga")  # fills blanks only
