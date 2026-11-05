@@ -278,3 +278,44 @@ def test_hidden_state_is_derived_from_sightings(env):
     sweep.reconcile_hidden(db)
     got = {r["id"]: r["rejected"] for r in db.all("SELECT id, rejected FROM cels")}
     assert got == {1: 1, 2: 0, 3: 0}
+
+
+def test_a_new_source_starts_with_a_quiet_read(env, monkeypatch):
+    s, db = env
+    db.put("baselined", True)  # an existing catalogue, from before eBay
+    first = Raw(
+        "ebay:1",
+        "eBay",
+        "Evangelion Rei production cel",
+        "https://example.invalid/e",
+        gbp=100.0,
+        lang="en",
+    )
+    later = Raw(
+        "ebay:2",
+        "eBay",
+        "Evangelion Asuka production cel",
+        "https://example.invalid/f",
+        gbp=100.0,
+        lang="en",
+    )
+    ys = Raw(
+        "yahoo:n1",
+        "Yahoo",
+        "エヴァンゲリオン セル画 アスカ",
+        "https://example.invalid/y",
+        yen=9000,
+        auction=True,
+    )
+    rounds = iter([[first, ys], [later]])
+    monkeypatch.setattr(sweep, "collect", lambda *a, **k: (next(rounds), set(), set(), {}))
+    monkeypatch.setattr(sweep, "to_check", lambda db: [])
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("", ""))
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    base = {
+        r["title_jp"][:3]: r["baseline"]
+        for r in db.all("SELECT title_jp, baseline FROM cels WHERE id > 3")
+    }
+    assert base == {"Eva": 1, "エヴァ": 0}  # eBay's first read is quiet; Yahoo's news is not
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert db.one("SELECT baseline FROM cels WHERE title_jp LIKE 'Evangelion A%'")["baseline"] == 0

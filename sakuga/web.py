@@ -21,7 +21,7 @@ from .filters import FRANCHISES
 
 HERE = Path(__file__).resolve().parent
 SAFE_NAME = re.compile(r"^[a-f0-9]{24}\.jpg$")
-SOURCES = ["Yahoo", "Mercari", "Mandarake", "Mandarake auction"]
+SOURCES = ["Yahoo", "Mercari", "Mandarake", "Mandarake auction", "eBay"]
 KINDS = {"cel": "Cel", "genga": "Genga", "douga": "Douga"}
 SORTS = {
     "newest": "Newest",

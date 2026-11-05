@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import catalog, filters, images, notify
+from . import catalog, ebay, filters, images, notify
 from .config import Settings
 from .db import DB
 from .llm import LLM
@@ -48,7 +48,12 @@ def collect(
                 locale="ja-JP", user_agent=UA, viewport={"width": 1366, "height": 900}
             )
             page = ctx.new_page()
-            for name, family, fn in jobs():
+            client = (
+                ebay.Client(s.ebay_client_id, s.ebay_client_secret, s.ebay_marketplace)
+                if s.ebay_client_id and s.ebay_client_secret
+                else None
+            )
+            for name, family, fn in jobs(client):
                 started, got, err = time.monotonic(), None, ""
                 for attempt in range(1, s.tries + 1):
                     try:
@@ -118,8 +123,18 @@ def _same_fn(db: DB, llm: LLM, img_dir: Path, listing_id: str, image: str):
     return same
 
 
+# The sources of the first release: a catalogue baselined before baselined_sources existed had read them.
+FIRST_SOURCES = ("Yahoo", "Mercari", "Mandarake", "Mandarake auction")
+
+
 def ingest(
-    db: DB, s: Settings, llm: LLM, raws: list[Raw], rate: float | None, baseline: bool
+    db: DB,
+    s: Settings,
+    llm: LLM,
+    raws: list[Raw],
+    rate: float | None,
+    baseline: bool,
+    quiet: frozenset[str] | set[str] = frozenset(),
 ) -> dict:
     """Store and catalogue one sweep's listings. Returns counts and the new cel ids."""
     t = now()
@@ -168,7 +183,9 @@ def ingest(
             continue
 
         # Converted first, so the minimum price applies to Mercari's pound-only prices too.
-        c = filters.classify(raw.title, raw.extra, yen, raw.cel_category, raw.auction)
+        c = filters.classify(
+            raw.title, raw.extra, yen, raw.cel_category, raw.auction, english=raw.lang == "en"
+        )
         if not c:
             continue
         seen.add(raw.id)
@@ -200,11 +217,12 @@ def ingest(
                     image,
                     ph,
                     int(k.gainax),
-                    int(baseline),
+                    int(baseline or raw.source in quiet),
                     t,
                     t,
                 )
-                new_cels.append(cel_id)
+                if not (baseline or raw.source in quiet):
+                    new_cels.append(cel_id)
             else:
                 # An accepted listing joining a cel hidden on a second look brings it back, as it now reads.
                 db.run(
@@ -411,7 +429,8 @@ def _notes(v: dict) -> str:
 #   a new ID, so STALE_DAYS unseen means gone.
 # - Mercari is fixed price and can sit unsold for months outside the search window, so a stale
 #   listing is checked on its own page and retires only when the page says it is sold or removed.
-READ_WHOLE = {"Mandarake", "Mandarake auction"}
+# Searches that return every match (eBay: each under one page), so absence means the listing ended.
+READ_WHOLE = {"Mandarake", "Mandarake auction", "eBay"}
 STALE_DAYS = 3
 # Yahoo auctions run up to seven days, so one can leave the search window and still be running.
 # A Mandarake auction lot beyond a full 240-lot page is judged the same way (they end too).
@@ -530,7 +549,12 @@ def run(
         if rate:
             db.put("yen_per_gbp", rate)
         baseline = not db.get("baselined", False)
-        got = ingest(db, s, model, raws, rate, baseline)
+        # A source added later gets its own quiet first read, as the whole catalogue did.
+        known = db.get("baselined_sources", None)
+        if known is None:
+            known = list(FIRST_SOURCES) if not baseline else []
+        quiet = {r.source for r in raws} - set(known)
+        got = ingest(db, s, model, raws, rate, baseline, quiet)
         backfill(db, model, s)
         reconcile_hidden(db)
         retire(db, got["seen"], failed, partial, checked)
@@ -538,6 +562,8 @@ def run(
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")
         if baseline and ok_jobs:
             db.put("baselined", True)
+        if quiet or db.get("baselined_sources", None) is None:
+            db.put("baselined_sources", sorted(set(known) | quiet))
         db.run(
             "UPDATE runs SET finished=?, status=?, listings=?, kept=?, new_cels=?, llm_calls=?, llm_cost=?,"
             " alerts=? WHERE id=?",
@@ -545,7 +571,7 @@ def run(
             status,
             len(raws),
             got["kept"],
-            0 if baseline else len(got["new_cels"]),
+            len(got["new_cels"]),
             model.usage.calls,
             round(model.usage.cost, 4),
             "; ".join(alerts),

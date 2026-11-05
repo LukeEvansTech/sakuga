@@ -1,7 +1,7 @@
 # sakuga
 
 A personal catalogue of Japanese anime production cels for sale. It watches Yahoo Auctions (through
-Buyee), Mercari and Mandarake for cels of a few franchises, recognises a relisted cel by its photo,
+Buyee), Mercari, Mandarake and eBay for cels of a few franchises, recognises a relisted cel by its photo,
 and sends one Pushover digest a day of the cels it has never seen before. Everything still for sale is
 on the Catalogue page, however long it has been listed.
 
@@ -9,7 +9,8 @@ on the Catalogue page, however long it has been listed.
 
 ```text
 sweep (every 30 min) ─▶ Buyee / Mercari / Mandarake shop + auctions (headless Chromium)
-                     ─▶ regular expression first pass (franchise from the Japanese title, prints and goods dropped)
+                     ─▶ eBay through the Browse API (UK marketplace, prices in pounds), when keys are set
+                     ─▶ regular expression first pass (franchise from the title, prints and goods dropped)
                      ─▶ photo saved + perceptual hash
                      ─▶ LLM reads title + photo once: cel / genga / reproduction / print, English title
                      ─▶ same cel as one already catalogued? (pHash; LLM compares borderline photos)
@@ -41,18 +42,21 @@ Docker: `docker build -t sakuga .` then
 
 ## Configuration
 
-| Variable            | Default         | Description                                                                |
-| ------------------- | --------------- | -------------------------------------------------------------------------- |
-| `SAKUGA_DATA`       | `data`          | Directory for `sakuga.db` and the stored photos (`img/`).                  |
-| `SAKUGA_PUBLIC_URL` | none            | Base URL of the web UI; alert links are absolute when set.                 |
-| `SAKUGA_SCHEDULE`   | `*/30 * * * *`  | Cron for sweeps.                                                           |
-| `SAKUGA_DIGEST`     | `0 8 * * *`     | Cron for the daily digest.                                                 |
-| `SAKUGA_TZ`         | `Europe/London` | Timezone both crons are read in.                                           |
-| `APPRISE_URLS`      | none            | Comma-separated Apprise URLs. Empty sends nothing.                         |
-| `SAKUGA_LLM_URL`    | none            | OpenAI-compatible endpoint. Empty: regular expression filter only, no LLM. |
-| `SAKUGA_LLM_KEY`    | none            | Bearer key for that endpoint.                                              |
-| `SAKUGA_LLM_MODEL`  | `claude`        | Model name; it must accept images.                                         |
-| `SAKUGA_TRIES`      | `3`             | Page loads per search before it counts as failed.                          |
+| Variable                  | Default         | Description                                                                |
+| ------------------------- | --------------- | -------------------------------------------------------------------------- |
+| `SAKUGA_DATA`             | `data`          | Directory for `sakuga.db` and the stored photos (`img/`).                  |
+| `SAKUGA_PUBLIC_URL`       | none            | Base URL of the web UI; alert links are absolute when set.                 |
+| `SAKUGA_SCHEDULE`         | `*/30 * * * *`  | Cron for sweeps.                                                           |
+| `SAKUGA_DIGEST`           | `0 8 * * *`     | Cron for the daily digest.                                                 |
+| `SAKUGA_TZ`               | `Europe/London` | Timezone both crons are read in.                                           |
+| `APPRISE_URLS`            | none            | Comma-separated Apprise URLs. Empty sends nothing.                         |
+| `SAKUGA_LLM_URL`          | none            | OpenAI-compatible endpoint. Empty: regular expression filter only, no LLM. |
+| `SAKUGA_LLM_KEY`          | none            | Bearer key for that endpoint.                                              |
+| `SAKUGA_LLM_MODEL`        | `claude`        | Model name; it must accept images.                                         |
+| `SAKUGA_TRIES`            | `3`             | Page loads per search before it counts as failed.                          |
+| `EBAY_CLIENT_ID`          | none            | eBay app ID (Browse API, client credentials). Empty: eBay not searched.    |
+| `EBAY_CLIENT_SECRET`      | none            | eBay cert ID for that app.                                                 |
+| `SAKUGA_EBAY_MARKETPLACE` | `EBAY_GB`       | eBay marketplace searched; its currency must be pounds.                    |
 
 ## Pages
 
