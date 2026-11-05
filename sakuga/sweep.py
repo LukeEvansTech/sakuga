@@ -139,7 +139,8 @@ MAX_PHOTO_PAGES = 40  # item pages opened per sweep for photos (Yahoo); the rest
 def gather_photos(page, db: DB, raws: list[Raw]) -> None:
     """Find the further photos of each listing the LLM will read: a new one past the title filter,
     or a kept one whose further photos were never stored. raw.photos stays None where unknown."""
-    todo: list[tuple[str, Raw]] = []  # (last tried, listing): new ones first, then the longest waiting
+    # (last tried, listing): new ones first, then the longest waiting
+    todo: list[tuple[str, Raw]] = []
     done: set[str] = set()
     for raw in raws:
         raw.photos = raw.photos if raw.source == "eBay" else None

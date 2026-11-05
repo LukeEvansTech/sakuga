@@ -488,4 +488,5 @@ def test_item_pages_go_to_new_listings_then_the_longest_waiting(env, monkeypatch
     ]
     sweep.gather_photos(None, db, raws)
     assert opened == ["yahoo:new", "yahoo:a2"]  # yahoo:a1 had its turn most recently
-    assert db.one("SELECT photos_tried FROM listings WHERE id = 'yahoo:a2'")["photos_tried"] > "2026-01-01 00:00:00"
+    tried = db.one("SELECT photos_tried FROM listings WHERE id = 'yahoo:a2'")["photos_tried"]
+    assert tried > "2026-01-01 00:00:00"
