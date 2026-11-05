@@ -7,6 +7,7 @@ first pass; the LLM (llm.py) then looks at the photo of anything that passes.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 MIN_YEN = 3000  # fixed prices below this are prints, prizes or scraps; real auctions start at ¥1
@@ -56,13 +57,16 @@ FRANCHISES: dict[str, dict[str, Any]] = {
 }
 
 JUNK = re.compile(
-    r"一番くじ|フィギュア|カード|セル画風|セル風|セル倶楽部|セル画倶楽部|セルクラブ|印刷|プリント|ポスター|同人|"
+    r"一番くじ|フィギュア|カード|セル画風|セル風|印刷|プリント|ポスター|同人|"
     r"原画集|設定資料|シール|ステッカー|アクリル|クリアファイル|下敷き|DVD|Blu-?ray|ブルーレイ|雑誌|アニメージュ|"
     r"付録|ZENBU|カタログ|フィルム|35mm|版画|ミストグラフ|キャラファイン|PSA|ブースター|メモリアル原画アート|テレカ|"
     r"テレホンカード|書籍|文庫|ムック|ポストカード|キーホルダー|缶バッジ|タペストリー|ジグソー|プライズ|景品|リペイント|カスタム|"
-    r"ichiban\s*kuji|figure|\bcards?\b|poster|cel\s*club|cel-style|doujin|sticker|acrylic|printed",
+    r"ichiban\s*kuji|figure|\bcards?\b|poster|cel-style|doujin|sticker|acrylic|printed",
     re.I,
 )
+# Cel Club (セル画倶楽部): mass-produced printed collectibles, never wanted. 俱 is the other form of 倶;
+# matched on NFKC text so full-width ＣＥＬ ＣＬＵＢ is caught too.
+CEL_CLUB = re.compile(r"セル画?\s*[倶俱]楽部|セル画?\s*クラブ|cell?\s*club", re.I)
 REPRO = re.compile(r"複製|復刻|リプロ|reproduction|replica|duplicate", re.I)
 CEL = re.compile(r"セル|\bcels?\b", re.I)
 GENGA = re.compile(
@@ -103,6 +107,8 @@ def classify(
     The price floor applies to fixed prices only: real cels go up on Yahoo at ¥1 starts.
     """
     text = f"{title} {extra}"
+    if CEL_CLUB.search(unicodedata.normalize("NFKC", text)):
+        return None
     key = franchise_of(title, extra)
     if not key:
         return None
@@ -113,7 +119,7 @@ def classify(
         and REPRO.search(text)
         and re.search(r"複製セル|reproduction cel", text, re.I)
         and GAINAX_LIMITED.search(text)
-        and not re.search(r"セル倶楽部|セル画倶楽部|cel\s*club|景品|プライズ", text, re.I)
+        and not re.search(r"景品|プライズ", text)
     ):
         return {"franchise": key, "kind": "gainax-limited"}
     if JUNK.search(text) or REPRO.search(text):

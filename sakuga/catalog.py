@@ -32,12 +32,14 @@ def keep(franchise: str, regex_kind: str, verdict: dict | None) -> Keep:
     """Combine the regex first pass (which already passed) with the LLM's reading of the photo.
 
     The regex keeps the franchise (it reads the Japanese title, which is reliable); the LLM may
-    only narrow: a print, a non-GAINAX reproduction, or drawings where the franchise wants cels only.
+    only narrow: a print or Cel Club, a non-GAINAX reproduction, or drawings where the franchise wants cels only.
     """
     gainax = regex_kind == "gainax-limited"
     if not verdict:
         return Keep(True, "cel" if gainax else regex_kind, gainax)
     kind = verdict.get("kind", "")
+    if verdict.get("cel_club") is True:
+        return Keep(False, "print", False, "LLM: Cel Club")
     # The LLM, having seen the photo, decides GAINAX either way: the title pattern is broad.
     gainax = bool(verdict.get("gainax_limited")) and franchise == "eva"
     if kind in ("print", "not_art"):

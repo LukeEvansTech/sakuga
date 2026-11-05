@@ -72,6 +72,12 @@ def test_keep_rules():
     # the title pattern said GAINAX; the LLM, seeing the photo, says an ordinary reproduction
     assert not keep("eva", "gainax-limited", {"kind": "reproduction", "gainax_limited": False}).ok
     assert not keep("broly", "cel", {"kind": "genga"}).ok
+    # Cel Club seen in the photo drops the listing whatever else the LLM said.
+    club = keep(
+        "eva", "gainax-limited", {"kind": "reproduction", "gainax_limited": True, "cel_club": True}
+    )
+    assert not club.ok and club.reason == "LLM: Cel Club"
+    assert not keep("eva", "cel", {"kind": "cel", "cel_club": True}).ok
     assert keep("fma", "genga", {"kind": "douga"}).ok
 
 

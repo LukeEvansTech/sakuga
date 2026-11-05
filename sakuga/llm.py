@@ -23,6 +23,7 @@ CLASSIFY = """You catalogue Japanese anime production art for a collector. Read 
 
 {"kind": "cel" | "genga" | "douga" | "reproduction" | "print" | "not_art",
  "gainax_limited": true|false,
+ "cel_club": true|false,
  "franchise": "broly" | "fma" | "eva" | "pokemon" | "other",
  "characters": ["English names"],
  "episode_cut": "e.g. ep 24 C-298, or empty",
@@ -36,6 +37,8 @@ Definitions:
 - reproduction: a 複製セル or replica, including official limited reproductions.
 - gainax_limited: an official GAINAX numbered limited reproduction cel (e.g. 限定100部, No.04/100).
 - print: printed cels, Cel Club (セル画倶楽部), prize cels, cards, posters, art books.
+- cel_club: true if the words or the photo show it is a Cel Club cel (セル画倶楽部, セル画俱楽部,
+  セル画クラブ, CEL CLUB), in any spelling. A Cel Club cel is never gainax_limited.
 - not_art: figures, books, goods, anything else.
 - broly is Dragon Ball's Broly (ブロリー) only; other Dragon Ball characters are "other".
 Judge from the photo as well as the words: a glossy printed card or a book page is not a cel.
@@ -139,7 +142,7 @@ class LLM:
         out: dict = {"kind": v["kind"]}
         for k in ("franchise", "episode_cut", "title_en", "notes"):
             out[k] = v[k] if isinstance(v.get(k), str) else ""
-        for k in ("gainax_limited", "background"):
+        for k in ("gainax_limited", "background", "cel_club"):
             out[k] = v.get(k) is True
         chars = v.get("characters")
         out["characters"] = (
