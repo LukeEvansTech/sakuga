@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "_cell.html" import code %}
+{% block title %}{{ c.title }} · Sakuga{% endblock %}
+{% block main %}
+<article class="cel">
+  <p class="crumb"><a href="/catalogue?franchise={{ c.franchise }}">{{ c.label }}</a> · <span class="code">{{ code(c) }}</span></p>
+
+  <div class="gallery{{ ' is-gone' if not c.available }}">
+    {% for p in photos %}
+    <figure class="ph-big">
+      <img class="big" src="/img/{{ p }}" alt="Photo {{ loop.index }} of {{ c.title }}">
+      {% if not c.available %}<svg class="strike" aria-hidden="true" preserveAspectRatio="none"><use href="#strike"/></svg>{% endif %}
+    </figure>
+    {% else %}
+    <figure class="ph-big"><span class="no-ph">No photo</span></figure>
+    {% endfor %}
+  </div>
+  {% if photos | length > 1 %}<p class="swipe">{{ photos | length }} photos, swipe for more</p>{% endif %}
+
+  <h1>{{ c.title }}</h1>
+  {% if c.title_en and c.title_jp and c.title_en != c.title_jp %}<p class="jp" lang="ja">{{ c.title_jp }}</p>{% endif %}
+
+  <dl class="facts">
+    <div><dt>Price now</dt><dd class="num">{% if c.best.yen %}{{ c.best.yen | yen }}{% if c.best.gbp %} <small>~{{ c.best.gbp | gbp }}</small>{% endif %}{% else %}{{ c.best.gbp | gbp or 'Not shown' }}{% endif %}</dd></div>
+    <div><dt>Status</dt><dd>{% if c.available %}For sale on {{ c.sources | join(', ') }}{% else %}No longer for sale{% endif %}</dd></div>
+    <div><dt>First seen</dt><dd>{{ c.first_seen | local }}</dd></div>
+    <div><dt>On the market</dt><dd><span class="num">{{ c.days }}</span> day{{ '' if c.days == 1 else 's' }}
+      <span class="span-bar" aria-hidden="true"><i style="width: {{ [c.days / 3.65, 100] | min | round(1) }}%"></i></span></dd></div>
+    <div><dt>Kind</dt><dd>{{ c.kind | capitalize }}{% if c.gainax %}, GAINAX limited reproduction{% endif %}</dd></div>
+  </dl>
+  {% if c.notes %}<p class="notes">{{ c.notes }}</p>{% endif %}
+
+  <h2 class="rule-head">Sightings <span class="n">{{ c.listings | length }}</span></h2>
+  <ul class="sightings">
+    {% for x in c.listings %}
+    <li class="{{ '' if x.active else 'is-gone' }}">
+      <div class="s-top">
+        <span class="s-site">{{ x.source }}</span>
+        <span class="num">{% if x.yen %}{{ x.yen | yen }}{% else %}{{ x.gbp | gbp }}{% endif %}</span>
+      </div>
+      <p class="s-meta">{{ x.info or ('auction' if x.auction else 'fixed price') }} · seen {{ x.first_seen | local }}{% if not x.active %} · gone {{ x.last_seen | local }}{% endif %}</p>
+      {% set h = history.get(x.id, []) %}
+      {% if h | length > 1 %}<p class="s-hist num">{% for p in h %}{{ p.yen | yen }}{{ ' → ' if not loop.last }}{% endfor %}</p>{% endif %}
+      <a class="out" href="{{ x.url }}" rel="noopener noreferrer" target="_blank">Open on {{ 'Buyee' if x.source == 'Yahoo' else x.source }}<svg class="out-icon" aria-hidden="true"><use href="#out"/></svg></a>
+    </li>
+    {% endfor %}
+  </ul>
+</article>
+{% endblock %}

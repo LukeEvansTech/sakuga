@@ -1,0 +1,13 @@
+.venv/
+data/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.syncthing.*
+*sync-conflict-*
+.DS_Store
+.impeccable/mocks/
+.impeccable/decision-payload*.json
+.impeccable/brief-body.md
+.impeccable/review/

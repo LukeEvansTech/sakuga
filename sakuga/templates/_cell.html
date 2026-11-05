@@ -1,0 +1,23 @@
+{% macro code(c) -%}
+{{ {'Yahoo': 'Y', 'Mercari': 'M', 'Mandarake': 'S', 'Mandarake auction': 'A'}.get(c.best.source, '–') }}-{{ '%04d' % c.id }}
+{%- endmacro %}
+
+{% macro cell(c, new=false) -%}
+{% set gone = not c.available %}
+<li class="cell{{ ' is-new' if new }}{{ ' is-gone' if gone }}">
+  <a class="cell-link" href="/cel/{{ c.id }}">
+    <span class="cell-head">
+      <span class="code">{{ code(c) }}</span>
+      <span class="age">{% if new %}New{% elif gone %}Gone{% else %}{{ c.days }}d{% endif %}</span>
+    </span>
+    <span class="ph">
+      {% if c.image %}<img src="/img/{{ c.image }}" alt="" loading="lazy" decoding="async">{% else %}<span class="no-ph">No photo</span>{% endif %}
+      {% if new %}<svg class="loop" aria-hidden="true" preserveAspectRatio="none"><use href="#loop"/></svg>{% endif %}
+      {% if gone %}<svg class="strike" aria-hidden="true" preserveAspectRatio="none"><use href="#strike"/></svg>{% endif %}
+    </span>
+    <span class="t">{{ c.title }}</span>
+    <span class="price">{% if c.best.yen %}{{ c.best.yen | yen }}{% else %}{{ c.best.gbp | gbp or 'No price' }}{% endif %}</span>
+    <span class="sub">{{ c.label }}{% if c.kind != 'cel' %} · {{ c.kind }}{% endif %}{% if c.gainax %} · GAINAX{% endif %}</span>
+  </a>
+</li>
+{%- endmacro %}

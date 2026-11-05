@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f0a0c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sakuga">
+  <title>{% block title %}Sakuga{% endblock %}</title>
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="icon" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
+</head>
+<body>
+  <svg width="0" height="0" class="defs" aria-hidden="true" focusable="false">
+    <symbol id="loop" viewBox="0 0 100 100">
+      <path d="M52 3.5C77 2.6 97.2 21 96.6 48.8c-.6 27.6-19.4 47.6-46.5 47.7C23.6 96.6 3.4 77.4 3.6 50.6 3.8 26.4 19.5 7.9 44 4.6c9-1.2 18.6.7 26.6 5.1" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    </symbol>
+    <symbol id="strike" viewBox="0 0 100 100">
+      <path d="M6 82C30 64 61 41 95 17" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    </symbol>
+    <symbol id="out" viewBox="0 0 16 16">
+      <path d="M6 3h7v7M13 3 4 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"/>
+    </symbol>
+  </svg>
+  <header class="top">
+    <a class="mark" href="/today">Sakuga<span>cel catalogue</span></a>
+    <p class="status">
+      {% if running %}<span class="dot dot-run"></span>Sweeping now
+      {% elif last_run %}<span class="dot {{ 'dot-bad' if last_run.status == 'failed' else ('dot-warn' if last_run.status == 'partial' else '') }}"></span>Checked {{ last_run.finished | ago }}
+      {% else %}<span class="dot dot-warn"></span>Not checked yet{% endif %}
+    </p>
+  </header>
+  <nav class="tabs" aria-label="Pages">
+    <a href="/today" {% if nav == 'today' %}aria-current="page"{% endif %}>Today</a>
+    <a href="/catalogue" {% if nav == 'catalogue' %}aria-current="page"{% endif %}>Catalogue</a>
+    <a href="/log" {% if nav == 'log' %}aria-current="page"{% endif %}>Log</a>
+  </nav>
+  <main>{% block main %}{% endblock %}</main>
+  <footer class="foot">Sakuga {{ version }}</footer>
+</body>
+</html>

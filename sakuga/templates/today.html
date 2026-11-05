@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_cell.html" import cell %}
+{% block title %}Today · Sakuga{% endblock %}
+{% block main %}
+<section class="lead">
+  <p class="count"><b>{{ fresh | length }}</b>
+    <span>new cel{{ '' if fresh | length == 1 else 's' }} since {% if digest %}the digest, {{ digest.created | local }}{% else %}the catalogue began{% endif %}<br>
+    {{ available }} for sale in all</span>
+  </p>
+  <p class="legend"><span class="key key-loop"><svg aria-hidden="true" preserveAspectRatio="none"><use href="#loop"/></svg></span>new to the catalogue
+    <span class="key key-strike"><svg aria-hidden="true" preserveAspectRatio="none"><use href="#strike"/></svg></span>no longer for sale</p>
+</section>
+
+{% if fresh %}
+<ul class="grid">{% for c in fresh %}{{ cell(c, new=true) }}{% endfor %}</ul>
+{% else %}
+<div class="empty">
+  <p>Nothing new since {% if digest %}the digest{% else %}the first sweep{% endif %}. Every cel seen so far is in the <a href="/catalogue">Catalogue</a>.</p>
+</div>
+{% endif %}
+
+{% if sent %}
+<h2 class="rule-head">In the digest of {{ digest.created | local }} <span class="n">{{ sent | length }}</span></h2>
+<ul class="grid">{% for c in sent %}{{ cell(c, new=c.available) }}{% endfor %}</ul>
+{% endif %}
+{% endblock %}

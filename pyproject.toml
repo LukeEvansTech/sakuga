@@ -1,0 +1,9 @@
+[project]
+name = "sakuga"
+version = "0.1.0"
+description = "Catalogue of Japanese anime production cels for sale: groups relists into one cel and sends one daily digest of new cels"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
