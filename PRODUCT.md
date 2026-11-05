@@ -9,8 +9,8 @@ web
 ## Users
 
 One collector (Luke) of Japanese anime production cels: Dragon Ball's Broly, Fullmetal Alchemist,
-Evangelion and Pokémon. The main moment is on a phone: the 08:00 Pushover digest arrives, he taps
-it, flicks through the day's new cels and opens one or two. Longer browsing of everything for sale is
+Evangelion and Pokémon. The main moment is on a phone: the 08:00 Pushover digest arrives; one tap
+opens Today, a flick through the day's new cels, and one or two get opened. Longer browsing of everything for sale is
 occasional.
 
 ## Product Purpose
