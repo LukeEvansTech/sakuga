@@ -62,13 +62,28 @@ class Raw:
     meta: dict = field(default_factory=dict)
 
 
-def _load(page, url: str, wait_sel: str, settle: int = 2500) -> None:
+def _load(page, url: str, wait_sel: str, settle: int = 2500, required: bool = True) -> None:
+    """Open a results page. With required, no result cards is a failed load, never an empty search:
+    every search here returns listings, and a failure must not retire live ones."""
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     try:
         page.wait_for_selector(wait_sel, timeout=20000)
-    except Exception:  # pylint: disable=broad-exception-caught
-        pass
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        if required:
+            raise RuntimeError(f"no results on {page.title()[:60]!r}") from e
     page.wait_for_timeout(settle)
+
+
+def _scroll_until_stable(page, sel: str, rounds: int = 12) -> None:
+    """Mercari renders 120 cards but fills in their links only once scrolled into view."""
+    last = -1
+    for _ in range(rounds):
+        n = page.evaluate(f"() => document.querySelectorAll({sel!r}).length")
+        if n == last:
+            break
+        last = n
+        page.mouse.wheel(0, 3000)
+        page.wait_for_timeout(700)
 
 
 def buyee(page, q: str) -> list[Raw]:
@@ -117,12 +132,13 @@ def mercari(page, q: str) -> list[Raw]:
         "&status=on_sale&sort=created_time&order=desc"
     )
     _load(page, url, 'li[data-testid="item-cell"]')
+    _scroll_until_stable(page, 'li[data-testid="item-cell"] a[href*="/item/"]')
     rows = page.evaluate("""() => [...document.querySelectorAll('li[data-testid="item-cell"]')]
       .map(li => { const a = li.querySelector('a'); const img = li.querySelector('img');
         return {href: a && a.href, text: li.innerText, alt: img ? (img.getAttribute('alt') || '') : '',
                 img: img ? (img.currentSrc || img.src || '') : ''}})""")
-    if not rows and "メルカリ" not in page.title() and "Mercari" not in page.title():
-        raise RuntimeError(f"not a Mercari page: {page.title()[:80]!r}")
+    if not any(r["href"] for r in rows):
+        raise RuntimeError(f"no Mercari items read ({page.title()[:60]!r})")
     out = []
     for r in rows:
         if not r["href"]:

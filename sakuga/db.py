@@ -104,6 +104,10 @@ class DB:
         self.path = path
         with self.tx() as c:
             c.executescript(SCHEMA)
+            # A sweep cut off by a restart never finishes; mark it so pages stop saying "Sweeping".
+            c.execute(
+                "UPDATE runs SET status = 'interrupted', finished = started WHERE status = 'running'"
+            )
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:

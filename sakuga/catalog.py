@@ -38,7 +38,8 @@ def keep(franchise: str, regex_kind: str, verdict: dict | None) -> Keep:
     if not verdict:
         return Keep(True, "cel" if gainax else regex_kind, gainax)
     kind = verdict.get("kind", "")
-    gainax = gainax or bool(verdict.get("gainax_limited")) and franchise == "eva"
+    # The LLM, having seen the photo, decides GAINAX either way: the title pattern is broad.
+    gainax = bool(verdict.get("gainax_limited")) and franchise == "eva"
     if kind in ("print", "not_art"):
         return Keep(False, kind, False, f"LLM: {kind.replace('_', ' ')}")
     if kind == "reproduction" and not gainax:

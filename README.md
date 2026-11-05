@@ -31,7 +31,7 @@ uv venv -p 3.13 .venv && uv pip install -p .venv -r requirements.txt -r requirem
 .venv/bin/python -m playwright install chromium
 .venv/bin/python -m pytest -q
 SAKUGA_DATA=data .venv/bin/python -m sakuga sweep --no-notify
-SAKUGA_DATA=data SAKUGA_SCHEDULE='0 0 1 1 *' .venv/bin/python -m sakuga serve   # :8080
+SAKUGA_DATA=data .venv/bin/python -m sakuga serve   # :8080, sweeps every 30 min, digest 08:00
 ```
 
 Docker: `docker build -t sakuga .` then

@@ -119,7 +119,7 @@ def ingest(
         seen.add(raw.id)
         yen = raw.yen or (round(raw.gbp * rate) if raw.gbp and rate else None)
         gbp = raw.gbp or (raw.yen / rate if raw.yen and rate else None)
-        old = db.one("SELECT ok, cel_id, yen FROM listings WHERE id = ?", raw.id)
+        old = db.one("SELECT ok, cel_id, yen, image FROM listings WHERE id = ?", raw.id)
         if old:
             db.run(
                 "UPDATE listings SET last_seen=?, active=1, yen=?, gbp=?, info=? WHERE id=?",
@@ -136,6 +136,17 @@ def ingest(
                     t,
                     yen,
                 )
+            if not old["image"] and raw.img_url:  # a photo that failed to download: try again
+                image, ph = images.download(raw.img_url, s.img_dir, referer=raw.url)
+                if image:
+                    db.run("UPDATE listings SET image=?, phash=? WHERE id=?", image, ph, raw.id)
+                    if old["cel_id"]:
+                        db.run(
+                            "UPDATE cels SET image=?, phash=? WHERE id=? AND image=''",
+                            image,
+                            ph,
+                            old["cel_id"],
+                        )
             if old["ok"] and old["cel_id"]:
                 kept += 1
                 db.run("UPDATE cels SET last_seen=?, available=1 WHERE id=?", t, old["cel_id"])
@@ -238,10 +249,23 @@ def _notes(v: dict) -> str:
     return " · ".join(bits)[:400]
 
 
+# Mandarake's sections are read whole, so a listing missing from them is gone. Yahoo (Buyee) and
+# Mercari searches show a window of the newest results, so a listing missing from one may simply
+# have dropped out of it: those retire only after STALE_DAYS unseen. Auctions end within a week
+# and a relist gets a new ID, so three days unseen means gone.
+READ_WHOLE = {"Mandarake", "Mandarake auction"}
+STALE_DAYS = 3
+
+
 def retire(db: DB, seen: set[str], failed: set[str]) -> None:
-    """Listings not seen this sweep are gone, except on a site whose search failed."""
-    for r in db.all("SELECT id, source FROM listings WHERE active = 1"):
-        if r["id"] not in seen and r["source"] not in failed:
+    """Retire listings that are gone; never on a site whose search failed this sweep."""
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=STALE_DAYS)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    for r in db.all("SELECT id, source, last_seen FROM listings WHERE active = 1"):
+        if r["id"] in seen or r["source"] in failed:
+            continue
+        if r["source"] in READ_WHOLE or r["last_seen"] < cutoff:
             db.run("UPDATE listings SET active = 0 WHERE id = ?", r["id"])
     db.run(
         "UPDATE cels SET available = EXISTS (SELECT 1 FROM listings l WHERE l.cel_id = cels.id"
@@ -249,13 +273,17 @@ def retire(db: DB, seen: set[str], failed: set[str]) -> None:
     )
 
 
-def instant(db: DB, s: Settings, new_cels: list[int]) -> list[str]:
-    """GAINAX limited cels alert at once (priority 1); everything else waits for the digest."""
+def instant(db: DB, s: Settings) -> list[str]:
+    """GAINAX limited cels alert at once (priority 1); everything else waits for the digest.
+
+    Read from the catalogue, not this sweep's new cels, so a send that failed is retried next sweep.
+    """
     out = []
-    for cel_id in new_cels:
-        cel = db.one("SELECT * FROM cels WHERE id = ? AND gainax = 1 AND baseline = 0", cel_id)
-        if not cel:
-            continue
+    for cel in db.all(
+        "SELECT * FROM cels WHERE gainax = 1 AND baseline = 0 AND instant_sent IS NULL"
+        " AND digest_id IS NULL"
+    ):
+        cel_id = cel["id"]
         lst = db.one(
             "SELECT source, yen, gbp FROM listings WHERE cel_id = ? ORDER BY first_seen LIMIT 1",
             cel_id,
@@ -293,7 +321,7 @@ def run(
         baseline = not db.get("baselined", False)
         got = ingest(db, s, model, raws, rate, baseline)
         retire(db, got["seen"], failed)
-        alerts = instant(db, s, got["new_cels"]) if notify_on else []
+        alerts = instant(db, s) if notify_on else []
         status = "failed" if ok_jobs == 0 else ("partial" if failed else "success")
         if baseline and ok_jobs:
             db.put("baselined", True)
@@ -335,7 +363,8 @@ def run(
 def pending(db: DB) -> list:
     """Cels first seen since the last digest (the first sweep's catalogue is not news)."""
     return db.all(
-        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 ORDER BY first_seen DESC"
+        "SELECT * FROM cels WHERE digest_id IS NULL AND baseline = 0 AND instant_sent IS NULL"
+        " ORDER BY first_seen DESC"
     )
 
 
@@ -367,7 +396,7 @@ def digest(db: DB, s: Settings, notify_on: bool = True) -> str:
         if notify_on
         else "off"
     )
-    if r in ("sent", "off"):
+    if r == "sent":  # marked only after the send succeeded; "off" keeps them pending
         did = db.run("INSERT INTO digests (created, cels, result) VALUES (?,?,?)", now(), n, r)
         with db.tx() as con:
             con.executemany(

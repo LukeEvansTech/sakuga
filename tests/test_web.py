@@ -86,10 +86,40 @@ def test_digest_marks_cels_only_after_send(env, monkeypatch):
     assert sweep.digest(db, s) == "nothing new"
 
 
-def test_failed_site_is_not_retired(env):
+def test_retire_rules(env):
     _, db = env
-    sweep.retire(db, seen={"yahoo:a1"}, failed={"Mercari"})
+    old = "2026-10-01 09:00:00"
+    db.run("UPDATE listings SET source = 'Mandarake' WHERE id = 'yahoo:a2'")
+    db.run("UPDATE listings SET last_seen = ? WHERE id = 'yahoo:a1'", old)
+    sweep.retire(db, seen=set(), failed={"Mercari"})
     active = {r["id"] for r in db.all("SELECT id FROM listings WHERE active = 1")}
-    assert active == {"yahoo:a1", "mercari:m3"}
+    # a1: Yahoo, unseen for weeks: gone. a2: Mandarake (read whole), unseen: gone.
+    # a3: Yahoo, seen today, may just have left the search window: kept. m3: Mercari failed: kept.
+    assert active == {"yahoo:a3", "mercari:m3"}
     avail = {r["id"]: r["available"] for r in db.all("SELECT id, available FROM cels")}
-    assert avail == {1: 1, 2: 0, 3: 1}  # cel 3 still on Mercari, whose search failed
+    assert avail == {1: 0, 2: 0, 3: 1}
+
+
+def test_digest_off_keeps_cels_pending(env):
+    s, db = env
+    assert sweep.digest(db, s) == "off"  # no APPRISE_URLS
+    assert len(sweep.pending(db)) == 2
+
+
+def test_instant_alert_retries_and_skips_digest(env, monkeypatch):
+    s, db = env
+    db.run("UPDATE cels SET gainax = 1 WHERE id = 2")
+    monkeypatch.setattr(notify, "send", lambda *a, **k: "failed: down")
+    sweep.instant(db, s)
+    assert db.one("SELECT instant_sent FROM cels WHERE id = 2")["instant_sent"] is None
+    monkeypatch.setattr(notify, "send", lambda *a, **k: "sent")
+    assert sweep.instant(db, s) == ["cel 2: sent"]  # retried on the next sweep
+    assert [c["id"] for c in sweep.pending(db)] == [3]  # announced once, not again in the digest
+    assert not sweep.instant(db, s)
+
+
+def test_interrupted_run_is_closed_on_start(env):
+    s, db = env
+    db.run("INSERT INTO runs (started, status) VALUES (?, 'running')", T)
+    db2 = DB(s.db_path)
+    assert db2.one("SELECT status FROM runs")["status"] == "interrupted"

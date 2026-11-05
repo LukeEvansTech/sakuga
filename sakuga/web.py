@@ -115,7 +115,7 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
 
     def page(request: Request, name: str, nav: str, **ctx) -> HTMLResponse:
         last = db.one("SELECT * FROM runs WHERE status != 'running' ORDER BY id DESC LIMIT 1")
-        running = db.one("SELECT id FROM runs WHERE status = 'running' ORDER BY id DESC LIMIT 1")
+        running = sweep.LOCK.locked()
         return tpl.TemplateResponse(
             request, name, {"nav": nav, "last_run": last, "running": running, **ctx}
         )

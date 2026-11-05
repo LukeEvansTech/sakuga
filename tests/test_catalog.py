@@ -69,5 +69,7 @@ def test_keep_rules():
     assert not keep("eva", "cel", {"kind": "reproduction", "gainax_limited": False}).ok
     g = keep("eva", "gainax-limited", {"kind": "reproduction", "gainax_limited": True})
     assert g.ok and g.gainax and g.kind == "cel"
+    # the title pattern said GAINAX; the LLM, seeing the photo, says an ordinary reproduction
+    assert not keep("eva", "gainax-limited", {"kind": "reproduction", "gainax_limited": False}).ok
     assert not keep("broly", "cel", {"kind": "genga"}).ok
     assert keep("fma", "genga", {"kind": "douga"}).ok
