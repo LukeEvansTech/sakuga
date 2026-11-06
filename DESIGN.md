@@ -1,23 +1,24 @@
 # Design
 
-Sakuga is laid out like a convention circle catalogue printed in reverse on oxblood: every cel is a
-numbered cell in a ruled grid, and state is marked by hand in red biro. Built 2026-11-05;
+Sakuga is laid out like a convention circle catalogue printed in reverse on graphite: every cel is a
+numbered cell in a ruled grid, and state is marked by hand in amber. Built 2026-11-05;
 `sakuga/static/app.css` is the source of truth for values.
 
 ## Palette
 
 | Token      | Value     | Job                                                            |
 | ---------- | --------- | -------------------------------------------------------------- |
-| `ground`   | `#1f0a0c` | Page ground (dark mode only; the phone is read in the morning) |
-| `ground-2` | `#2a0e11` | Hover and control fill                                         |
-| `rule`     | `#5a1c22` | Every rule, border and grid line, 1px                          |
-| `shell`    | `#7d1520` | Current tab, primary button                                    |
-| `ink`      | `#efe3cf` | Text                                                           |
-| `ink-2`    | `#c99a92` | Secondary text and labels                                      |
-| `ink-3`    | `#9b7770` | Gone and disabled text                                         |
-| `biro`     | `#f05a4f` | Hand marks only: the new-cel loop, the gone strike, failures   |
-| `gold`     | `#e8b04a` | Cell codes, counts, price history                              |
-| `paper`    | `#efe3cf` | Ground behind every cel photo, so paint reads true             |
+| `ground`   | `#141414` | Page ground (dark mode only; the phone is read in the morning) |
+| `ground-2` | `#1d1d1d` | Hover and control fill                                         |
+| `rule`     | `#333333` | Every rule, border and grid line, 1px                          |
+| `shell`    | `#2a2a2a` | Current tab (amber underline), primary button                  |
+| `ink`      | `#ece8e1` | Text                                                           |
+| `ink-2`    | `#b5afa5` | Secondary text and labels                                      |
+| `ink-3`    | `#8a857d` | Gone and disabled text                                         |
+| `biro`     | `#f5a524` | Hand marks only (amber): the new-cel loop, the gone strike     |
+| `bad`      | `#e8705a` | Failures on the Log page, nothing else                         |
+| `gold`     | `#c9ad7a` | Cell codes, counts, price history                              |
+| `paper`    | `#ece8e1` | Ground behind every cel photo, so paint reads true             |
 
 ## Type
 
@@ -40,5 +41,5 @@ numbered cell in a ruled grid, and state is marked by hand in red biro. Built 20
 ## Rules
 
 - No radius, no shadows, no gradients. Depth comes from rules and the paper photo ground.
-- Biro red is a state, never decoration.
+- The amber biro is a state, never decoration. No red anywhere but failures (Luke disliked the oxblood scheme, 2026-11-06).
 - Empty states are a ruled box with one sentence and the next step.

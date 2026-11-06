@@ -1,17 +1,18 @@
-/* Sakuga: a convention circle catalogue printed in reverse on oxblood. Ruled whole-cell grid,
-   codes and numbers in Archivo Narrow, red biro marks for state (new: loop, gone: strike). */
+/* Sakuga: a convention circle catalogue printed in reverse on graphite. Ruled whole-cell grid,
+   codes and numbers in Archivo Narrow, amber marks for state (new: loop, gone: strike). */
 
 :root {
-  --ground: #1f0a0c;
-  --ground-2: #2a0e11;
-  --rule: #5a1c22;
-  --shell: #7d1520;
-  --ink: #efe3cf;
-  --ink-2: #c99a92;
-  --ink-3: #9b7770;
-  --biro: #f05a4f;
-  --gold: #e8b04a;
-  --paper: #efe3cf;
+  --ground: #141414;
+  --ground-2: #1d1d1d;
+  --rule: #333;
+  --shell: #2a2a2a;
+  --ink: #ece8e1;
+  --ink-2: #b5afa5;
+  --ink-3: #8a857d;
+  --biro: #f5a524;
+  --bad: #e8705a;
+  --gold: #c9ad7a;
+  --paper: #ece8e1;
   --narrow: "Archivo Narrow", "Arial Narrow", sans-serif;
   --sans:
     -apple-system, blinkmacsystemfont, "Hiragino Sans",
@@ -118,7 +119,7 @@ a:hover {
 }
 
 .dot-bad {
-  background: var(--biro);
+  background: var(--bad);
 }
 
 .dot-run {
@@ -157,6 +158,7 @@ a:hover {
 
 .tabs a[aria-current="page"] {
   background: var(--shell);
+  box-shadow: inset 0 -3px 0 var(--biro);
   color: var(--ink);
   font-weight: 600;
 }
@@ -345,7 +347,7 @@ main {
   place-items: center;
   height: 100%;
   font-size: 11px;
-  color: #6b3a36;
+  color: #6b665e;
   background: var(--paper);
 }
 
@@ -457,7 +459,7 @@ select {
 button {
   padding: 9px 16px;
   background: var(--shell);
-  border-color: var(--shell);
+  border-color: var(--ink-3);
   font-weight: 600;
   cursor: pointer;
 }
@@ -720,7 +722,7 @@ button:disabled {
 }
 
 .st-failed .res {
-  color: var(--biro);
+  color: var(--bad);
   font-weight: 600;
 }
 
@@ -762,7 +764,7 @@ details summary {
 }
 
 .srcs li.bad {
-  color: var(--biro);
+  color: var(--bad);
 }
 
 .srcs em {
