@@ -111,7 +111,8 @@ def gather(db: DB, now: dt.datetime | None = None) -> dict:
         "by": sorted(by.items(), key=lambda x: -x[1]),
         "available": avail["n"] if avail else 0,
         "runs": len(runs),
-        "bad_runs": sum(1 for r in runs if r["status"] == "failed"),
+        # cut off by a restart counts as a problem too: it may not have read everything
+        "bad_runs": sum(1 for r in runs if r["status"] in ("failed", "interrupted")),
         "failed_sources": [(r["name"], r["n"]) for r in failed_sources],
         "cost": sum(r["llm_cost"] or 0 for r in runs),
         "last_run": last_run,
@@ -159,7 +160,7 @@ def health_text(g: dict) -> str:
         return "No sweeps ran since the last email."
     out = f"{g['runs']} sweep{'s' if g['runs'] != 1 else ''} ran"
     if g["bad_runs"]:
-        out += f", {g['bad_runs']} failed"
+        out += f", {g['bad_runs']} failed or cut off"
     if g["failed_sources"]:
         out += "; searches that failed: " + ", ".join(f"{n} ({k}×)" for n, k in g["failed_sources"])
     return out + "."

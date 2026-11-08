@@ -27,7 +27,7 @@
   </p>
   <p style="margin:6px 0 0;font-size:13px;line-height:19px;color:{{ c.ink3 }};">
     {%- if g.runs == 0 %}<b style="color:{{ c.bad }};">No sweeps ran since the last email.</b>
-    {%- elif g.bad_runs %}<b style="color:{{ c.bad }};">{{ g.bad_runs }} of {{ g.runs }} sweeps failed.</b> <a href="{{ link('/log') }}" style="color:{{ c.biro }};">See the Log</a>.
+    {%- elif g.bad_runs %}<b style="color:{{ c.bad }};">{{ g.bad_runs }} of {{ g.runs }} sweeps failed or were cut off.</b> <a href="{{ link('/log') }}" style="color:{{ c.biro }};">See the Log</a>.
     {%- else %}{{ g.runs }} sweep{{ 's' if g.runs != 1 }} ran{% if g.cost %}, LLM ${{ '%.2f' % g.cost }}{% endif %}.{% endif %}
     {%- if g.failed_sources %} Failed searches, each tried again next sweep: {% for name, n in g.failed_sources %}{{ name }} {{ n }}×{{ ', ' if not loop.last }}{% endfor %}.{% endif %}
   </p>

@@ -471,7 +471,14 @@ def regroup(db: DB, llm: LLM, s: Settings, raw: Raw, cel_id: int, image: str, ph
     with NOTIFY_LOCK:
         cel = db.one("SELECT * FROM cels WHERE id = ?", cel_id)
         n = db.one("SELECT COUNT(*) n FROM listings WHERE cel_id = ?", cel_id)
-        if not cel or not n or n["n"] != 1 or cel["digest_id"] or cel["instant_sent"]:
+        if (
+            not cel
+            or not n
+            or n["n"] != 1
+            or cel["digest_id"]
+            or cel["instant_sent"]
+            or cel["mailed"]
+        ):
             return
         match = catalog.group(
             ph,
@@ -597,7 +604,7 @@ def _instant(db: DB, s: Settings) -> list[str]:
     out = []
     for cel in db.all(
         "SELECT * FROM cels WHERE gainax = 1 AND baseline = 0 AND instant_sent IS NULL AND rejected = 0"
-        " AND digest_id IS NULL"
+        " AND digest_id IS NULL AND mailed IS NULL"  # the email may have carried it already
     ):
         cel_id = cel["id"]
         lst = db.one(
