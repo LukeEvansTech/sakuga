@@ -116,7 +116,7 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
     app = FastAPI(title="sakuga", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     tpl = Jinja2Templates(directory=HERE / "templates")
-    rate = {"v": FALLBACK_RATE, "at": 0.0}
+    rate: dict[str, float | None] = {"v": FALLBACK_RATE, "at": None}  # None: read on first use
 
     def in_gbp(yen_v, gbp_v=None) -> str:
         """A price in pounds: the site's own figure, else the yen at the sites' current rate."""
@@ -124,9 +124,10 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
             return gbp(gbp_v)
         if not yen_v:
             return ""
-        if time.monotonic() - rate["at"] > 600:
+        at = rate["at"]
+        if at is None or time.monotonic() - at > 600:
             rate.update(v=yen_per_gbp(db), at=time.monotonic())
-        return gbp(yen_v / rate["v"])
+        return gbp(yen_v / (rate["v"] or FALLBACK_RATE))
 
     tpl.env.filters.update(
         yen=yen, gbp=gbp, in_gbp=in_gbp, ago=ago, local=lambda v: local_time(v, s.timezone)
