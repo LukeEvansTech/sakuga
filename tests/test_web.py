@@ -585,7 +585,7 @@ def test_hinted_listing_needs_a_photo_and_keeps_its_franchise_quiet(env, monkeyp
     say = _Says({"kind": "cel", "franchise": "kiki"})
     sweep.ingest(db, s, say, [typo], 200.0, False, quiet_franchises={"kiki"})
     assert db.one("SELECT id FROM listings WHERE id = 'yahoo:o3'") is None  # no photo: no verdict
-    assert db.get(sweep.QUIET_HELD, []) == ["yahoo:o3"]
+    assert db.get(sweep.QUIET_HELD, []) == [["yahoo:o3", ""]]
     # the photo arrives after Kiki finished its first read: the cel is still not news
     monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("o.jpg", "0f0f0f0f0f0f0f0f"))
     got = sweep.ingest(db, s, say, [typo], 200.0, False)
@@ -613,3 +613,15 @@ def test_backfill_keeps_the_category_rule(env):
     sweep.backfill(db, _Says({"kind": "cel", "franchise": "other"}), s, limit=1)
     row = db.one("SELECT ok, reason FROM listings WHERE id = 'yahoo:a2'")
     assert (row["ok"], row["reason"]) == (0, "LLM: not Eva, though filed there")
+
+
+def test_a_held_photo_keeps_its_relist_quiet(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("o.jpg", "0f0f0f0f0f0f0f0f"))
+    typo = Raw("yahoo:o4", "Yahoo", "エゥンゲリオン セル画", "https://example.invalid/o", yen=60000)
+    typo = dataclasses.replace(typo, cel_category=True, auction=True, hint="kiki")
+    sweep.ingest(db, s, _Says(None), [typo], 200.0, False, quiet_franchises={"kiki"})
+    relist = dataclasses.replace(typo, id="yahoo:o5")
+    got = sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "kiki"}), [relist], 200.0, False)
+    assert not got["new_cels"]
+    assert db.get(sweep.QUIET_HELD, None) == [["yahoo:o4", "0f0f0f0f0f0f0f0f"]]

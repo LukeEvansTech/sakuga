@@ -166,9 +166,19 @@ def gather_photos(page, db: DB, raws: list[Raw]) -> None:
         if old:
             if old["ok"] and not old["photos_done"]:
                 todo.append((old["photos_tried"] or "0", raw))
-        elif filters.classify(
-            raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction, raw.lang == "en", raw.hint
-        ):
+        elif (
+            c := filters.classify(
+                raw.title,
+                raw.extra,
+                raw.yen,
+                raw.cel_category,
+                raw.auction,
+                raw.lang == "en",
+                raw.hint,
+            )
+        ) and not c["hinted"]:
+            # A hinted one waits for its verdict on the main photo; once stored it joins the queue,
+            # so an unanswered one never holds the page budget sweep after sweep.
             todo.append(("", raw))
     pages = 0
     for _, raw in sorted(todo, key=lambda x: x[0]):
@@ -214,8 +224,10 @@ def ingest(
     t = now()
     seen: set[str] = set()
     kept, new_cels = 0, []
-    deferred: set[str] = set()
-    held = set(db.get(QUIET_HELD, []))  # deferred on an earlier quiet read
+    deferred: dict[str, str] = {}  # listing id -> photo hash
+    # Deferred on an earlier quiet read, by id and by photo (a relist under a new id).
+    held: dict[str, str] = dict(db.get(QUIET_HELD, []))
+    held_ph = [h for h in held.values() if h]
     for raw in raws:
         if raw.id in seen:
             continue
@@ -304,8 +316,9 @@ def ingest(
                 or raw.source in quiet
                 or c["franchise"] in quiet_franchises
                 or raw.id in held
+                or _held_photo(held_ph, ph)
             ):
-                deferred.add(raw.id)
+                deferred[raw.id] = ph
             continue
         k = catalog.keep(c["franchise"], c["kind"], verdict, c["hinted"])
         if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
@@ -324,6 +337,7 @@ def ingest(
                 or raw.source in quiet
                 or c["franchise"] in quiet_franchises
                 or raw.id in held
+                or _held_photo(held_ph, ph)
             )
             if cel_id is None:
                 cel_id = db.run(
@@ -400,8 +414,14 @@ def ingest(
                 yen,
             )
         # Held until stored (seen and not deferred again), then forgotten.
-    db.put(QUIET_HELD, sorted(held - (seen - deferred) | deferred)[-MAX_HELD:])
+    stored = seen - set(deferred)
+    still_held = {i: h for i, h in held.items() if i not in stored} | deferred
+    db.put(QUIET_HELD, sorted(still_held.items())[-MAX_HELD:])
     return {"seen": seen, "kept": kept, "new_cels": new_cels}
+
+
+def _held_photo(held: list[str], ph: str) -> bool:
+    return bool(ph) and any(images.distance(ph, h) <= catalog.NEAR for h in held)
 
 
 def rejected_twin(db: DB, franchise: str, ph: str):
