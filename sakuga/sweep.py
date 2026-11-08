@@ -319,6 +319,8 @@ def ingest(
                 or _held_photo(held_ph, ph)
             ):
                 deferred[raw.id] = ph or held.get(raw.id, "")  # a failed retry keeps the photo
+                if ph:
+                    held_ph.append(ph)  # a later listing this sweep may show it too
             continue
         k = catalog.keep(c["franchise"], c["kind"], verdict, c["hinted"])
         if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
