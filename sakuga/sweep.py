@@ -471,14 +471,8 @@ def regroup(db: DB, llm: LLM, s: Settings, raw: Raw, cel_id: int, image: str, ph
     with NOTIFY_LOCK:
         cel = db.one("SELECT * FROM cels WHERE id = ?", cel_id)
         n = db.one("SELECT COUNT(*) n FROM listings WHERE cel_id = ?", cel_id)
-        if (
-            not cel
-            or not n
-            or n["n"] != 1
-            or cel["digest_id"]
-            or cel["instant_sent"]
-            or cel["mailed"]
-        ):
+        announced = cel and (cel["digest_id"] or cel["instant_sent"] or cel["mailed"])
+        if not cel or not n or n["n"] != 1 or announced:
             return
         match = catalog.group(
             ph,
