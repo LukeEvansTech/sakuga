@@ -1,6 +1,7 @@
 """The daily email: what it covers, when its start point moves, and how it joins the digest."""
 
 import dataclasses
+import datetime as dt
 import io
 
 import pytest
@@ -9,7 +10,7 @@ from PIL import Image
 from sakuga import mail, notify, sweep
 from sakuga.web import create_app
 
-from tests.conftest import T
+T = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class FakeSMTP:
