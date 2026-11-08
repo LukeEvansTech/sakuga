@@ -83,12 +83,14 @@ def collect(
                     if not getattr(got, "complete", True):
                         partial.add(family)
                 db.run(
-                    "INSERT OR REPLACE INTO run_sources (run_id, name, count, error, seconds) VALUES (?,?,?,?,?)",
+                    "INSERT OR REPLACE INTO run_sources (run_id, name, count, error, seconds, partial)"
+                    " VALUES (?,?,?,?,?,?)",
                     run_id,
                     name,
                     None if got is None else len(got),
                     err or None,
                     round(time.monotonic() - started, 1),
+                    int(got is not None and not getattr(got, "complete", True)),
                 )
             gather_photos(page, db, raws)
             for url in check or []:
@@ -208,6 +210,7 @@ def ingest(
     t = now()
     seen: set[str] = set()
     kept, new_cels = 0, []
+    deferred: set[str] = set()
     for raw in raws:
         if raw.id in seen:
             continue
@@ -288,8 +291,11 @@ def ingest(
             # Never the further photos alone: a douga beside a cel would read as the listing.
             [s.img_dir / f for f in [image, *more]] if image else [],
         )
-        if verdict is None and c["hinted"]:
-            continue  # only the LLM can confirm a category's franchise: stored once it answers
+        if c["hinted"] and (verdict is None or not image):
+            # Only the LLM, with the photo, can confirm a category's franchise: stored once it has.
+            # Its franchise stays on its first read meanwhile, so it is not announced later as new.
+            deferred.add(c["franchise"])
+            continue
         k = catalog.keep(c["franchise"], c["kind"], verdict, c["hinted"])
         if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
             # No answer this time, but the same photo was rejected before: a relist of that artwork.
@@ -342,7 +348,7 @@ def ingest(
         db.run(
             "INSERT INTO listings (id, source, cel_id, title, extra, url, img_url, image, phash, yen, gbp,"
             " info, auction, franchise, kind, verdict, ok, reason, first_seen, last_seen, photos,"
-            " photos_done, recheck) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " photos_done, recheck, hinted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             raw.id,
             raw.source,
             cel_id,
@@ -368,6 +374,7 @@ def ingest(
             int(
                 bool(more) and not image
             ),  # withheld for want of the main photo: asked once it comes
+            int(c["hinted"]),
         )
         if yen:
             db.run(
@@ -376,7 +383,7 @@ def ingest(
                 t,
                 yen,
             )
-    return {"seen": seen, "kept": kept, "new_cels": new_cels}
+    return {"seen": seen, "kept": kept, "new_cels": new_cels, "deferred": deferred}
 
 
 def rejected_twin(db: DB, franchise: str, ph: str):
@@ -414,7 +421,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
     catalogue (its cel is hidden if nothing else holds it), and kind and GAINAX follow the LLM. Returns the number answered.
     """
     rows = db.all(
-        "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id,"
+        "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id, l.hinted,"
         " c.gainax FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
         " WHERE l.ok = 1 AND (l.verdict = '' OR l.recheck = 1)"
         " AND l.image != ''"  # sold ones too: they hold a cel visible
@@ -435,7 +442,9 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
         if not verdict:
             continue
         answered += 1
-        k = catalog.keep(r["franchise"], "gainax-limited" if r["gainax"] else "cel", verdict)
+        k = catalog.keep(
+            r["franchise"], "gainax-limited" if r["gainax"] else "cel", verdict, bool(r["hinted"])
+        )
         # One transaction per listing: an interruption leaves the listing and its cel consistent.
         with NOTIFY_LOCK, db.tx() as con:
             if not k.ok:
@@ -689,8 +698,16 @@ def run(
         done = {family for name, family, _ in search_jobs(s) if name in read_ok} & quiet
         if done or db.get("baselined_sources", None) is None:
             db.put("baselined_sources", sorted(set(known) | done))
+        # Only whole reads count: a search stopped at its page cap left listings unseen.
+        whole = {
+            r["name"]
+            for r in db.all(
+                "SELECT name FROM run_sources WHERE run_id = ? AND count IS NOT NULL AND partial = 0",
+                run_id,
+            )
+        }
         names = {name for name, _, _ in search_jobs(s)}
-        done_f = {k for k in quiet_f if (franchise_jobs(k) & names) <= read_ok}
+        done_f = {k for k in quiet_f - got["deferred"] if (franchise_jobs(k) & names) <= whole}
         if done_f or db.get("baselined_franchises", None) is None:
             db.put("baselined_franchises", sorted(set(known_f) | done_f))
         db.run(

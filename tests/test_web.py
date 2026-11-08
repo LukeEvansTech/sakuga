@@ -550,16 +550,18 @@ def test_a_franchise_is_baselined_once_all_its_searches_read(env, monkeypatch):
     db.put("baselined_franchises", ["broly", "fma", "eva", "pokemon"])
     monkeypatch.setattr(sweep, "backfill", lambda *a, **k: 0)
     failing = {"mercari:魔女の宅急便 セル画"}
+    capped = {"buyee:悟空"}
 
     def collect(_s, db_, run_id, _check=None):
         for name, _, _ in sweep.search_jobs(_s):
             ok = name not in failing
             db_.run(
-                "INSERT INTO run_sources (run_id, name, count, error) VALUES (?,?,?,?)",
+                "INSERT INTO run_sources (run_id, name, count, error, partial) VALUES (?,?,?,?,?)",
                 run_id,
                 name,
                 0 if ok else None,
                 None if ok else "down",
+                int(name in capped),
             )
         return [], set(), set(), {}
 
@@ -567,6 +569,27 @@ def test_a_franchise_is_baselined_once_all_its_searches_read(env, monkeypatch):
     sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
     assert "kiki" not in db.get("baselined_franchises", [])  # one of its searches failed
     assert "bebop" in db.get("baselined_franchises", [])
+    assert "goku" not in db.get("baselined_franchises", [])  # stopped at its page cap
     failing.clear()
+    capped.clear()
     sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
     assert set(db.get("baselined_franchises", [])) == set(sweep.FRANCHISES)
+
+
+def test_hinted_listing_needs_a_photo_and_keeps_its_franchise_quiet(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("", ""))
+    typo = Raw("yahoo:o3", "Yahoo", "エゥンゲリオン セル画", "https://example.invalid/o", yen=60000)
+    typo = dataclasses.replace(typo, cel_category=True, auction=True, hint="kiki")
+    got = sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "other"}), [typo], 200.0, False)
+    assert db.one("SELECT id FROM listings WHERE id = 'yahoo:o3'") is None  # no photo: no verdict
+    assert got["deferred"] == {"kiki"}
+
+
+def test_backfill_keeps_the_category_rule(env):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg', hinted = 1, verdict = '' WHERE id = 'yahoo:a2'")
+    db.run("UPDATE listings SET first_seen = '2099-01-01 00:00:00' WHERE id = 'yahoo:a2'")
+    sweep.backfill(db, _Says({"kind": "cel", "franchise": "other"}), s, limit=1)
+    row = db.one("SELECT ok, reason FROM listings WHERE id = 'yahoo:a2'")
+    assert (row["ok"], row["reason"]) == (0, "LLM: not Eva, though filed there")

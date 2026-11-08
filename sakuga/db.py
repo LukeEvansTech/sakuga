@@ -129,6 +129,11 @@ class DB:
                 c.execute("ALTER TABLE listings ADD COLUMN photos_tried TEXT")
             if "photos_done" not in cols:  # every further photo stored, or gone for good
                 c.execute("ALTER TABLE listings ADD COLUMN photos_done INTEGER NOT NULL DEFAULT 0")
+            if "hinted" not in cols:  # franchise from a Yahoo category alone: the LLM must agree
+                c.execute("ALTER TABLE listings ADD COLUMN hinted INTEGER NOT NULL DEFAULT 0")
+            rs_cols = {r["name"] for r in c.execute("PRAGMA table_info(run_sources)")}
+            if "partial" not in rs_cols:  # the search stopped at its page cap
+                c.execute("ALTER TABLE run_sources ADD COLUMN partial INTEGER NOT NULL DEFAULT 0")
             # A sweep cut off by a restart never finishes; mark it so pages stop saying "Sweeping".
             c.execute(
                 "UPDATE runs SET status = 'interrupted', finished = started WHERE status = 'running'"
