@@ -41,8 +41,9 @@ def search_jobs(s: Settings) -> list:
 
 
 def franchise_jobs(key: str) -> set[str]:
-    """Every search of a franchise's own, browser and eBay, by job name."""
-    return sources.job_names(key) | ebay.job_names(key)
+    """Every search that can find a franchise's listings, by job name: its own browser and eBay
+    searches, and Mandarake's two, which read every cel."""
+    return sources.job_names(key) | ebay.job_names(key) | MANDARAKE_JOBS
 
 
 def collect(
@@ -138,6 +139,9 @@ def _same_fn(db: DB, llm: LLM, img_dir: Path, listing_id: str, image: str):
 
 # The sources of the first release: a catalogue baselined before baselined_sources existed had read them.
 FIRST_SOURCES = ("Yahoo", "Mercari", "Mandarake", "Mandarake auction")
+QUIET_HELD = "quiet_held"  # kv: hinted listings first seen on a quiet read, not yet stored
+MAX_HELD = 2000
+MANDARAKE_JOBS = {"mandarake-shop", "mandarake-auction"}
 # Likewise the franchises, before baselined_franchises existed.
 FIRST_FRANCHISES = ("broly", "fma", "eva", "pokemon")
 ALL_SOURCES = (*FIRST_SOURCES, "eBay")
@@ -211,6 +215,7 @@ def ingest(
     seen: set[str] = set()
     kept, new_cels = 0, []
     deferred: set[str] = set()
+    held = set(db.get(QUIET_HELD, []))  # deferred on an earlier quiet read
     for raw in raws:
         if raw.id in seen:
             continue
@@ -293,8 +298,14 @@ def ingest(
         )
         if c["hinted"] and (verdict is None or not image):
             # Only the LLM, with the photo, can confirm a category's franchise: stored once it has.
-            # Its franchise stays on its first read meanwhile, so it is not announced later as new.
-            deferred.add(c["franchise"])
+            # Seen on a quiet read, it stays quiet when it is stored later.
+            if (
+                baseline
+                or raw.source in quiet
+                or c["franchise"] in quiet_franchises
+                or raw.id in held
+            ):
+                deferred.add(raw.id)
             continue
         k = catalog.keep(c["franchise"], c["kind"], verdict, c["hinted"])
         if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
@@ -308,7 +319,12 @@ def ingest(
                 ph, c["franchise"], cands, _same_fn(db, llm, s.img_dir, raw.id, image), raw.title
             )
             v = verdict or {}
-            still = baseline or raw.source in quiet or c["franchise"] in quiet_franchises
+            still = (
+                baseline
+                or raw.source in quiet
+                or c["franchise"] in quiet_franchises
+                or raw.id in held
+            )
             if cel_id is None:
                 cel_id = db.run(
                     "INSERT INTO cels (franchise, kind, title_en, title_jp, notes, image, phash, gainax,"
@@ -383,17 +399,20 @@ def ingest(
                 t,
                 yen,
             )
-    return {"seen": seen, "kept": kept, "new_cels": new_cels, "deferred": deferred}
+        # Held until stored (seen and not deferred again), then forgotten.
+    db.put(QUIET_HELD, sorted(held - (seen - deferred) | deferred)[-MAX_HELD:])
+    return {"seen": seen, "kept": kept, "new_cels": new_cels}
 
 
 def rejected_twin(db: DB, franchise: str, ph: str):
     """A listing the LLM rejected whose photo is this one (a relist), or None."""
     if not ph:
         return None
+    keys = filters.scope(franchise)
     rows = db.all(
-        "SELECT id, kind, phash FROM listings WHERE franchise = ? AND ok = 0 AND verdict != ''"
-        " AND phash != ''",
-        franchise,
+        f"SELECT id, kind, phash FROM listings WHERE franchise IN ({','.join('?' * len(keys))})"
+        " AND ok = 0 AND verdict != '' AND phash != ''",
+        *keys,
     )
     return next((r for r in rows if images.distance(ph, r["phash"]) <= catalog.NEAR), None)
 
@@ -482,13 +501,16 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
 def candidates(db: DB, franchise: str, exclude: int = 0) -> list[catalog.Candidate]:
     """Every known photo of every cel in the franchise: each cel's own, and each of its listings'
     (a relist may reuse any photo the cel was ever shown with, under any title)."""
+    keys = filters.scope(franchise)  # Dragon Ball's three share their cels
+    marks = ",".join("?" * len(keys))
     rows = db.all(
-        "SELECT id AS cel, phash, title_jp AS title FROM cels WHERE franchise = ? AND id != ?"
-        " UNION ALL SELECT cel_id, phash, title FROM listings"
-        " WHERE franchise = ? AND ok = 1 AND cel_id IS NOT NULL AND cel_id != ? AND phash != ''",
-        franchise,
+        f"SELECT id AS cel, phash, title_jp AS title FROM cels WHERE franchise IN ({marks})"
+        " AND id != ? UNION ALL SELECT cel_id, phash, title FROM listings"
+        f" WHERE franchise IN ({marks}) AND ok = 1 AND cel_id IS NOT NULL AND cel_id != ?"
+        " AND phash != ''",
+        *keys,
         exclude,
-        franchise,
+        *keys,
         exclude,
     )
     return [catalog.Candidate(r["cel"], r["phash"], franchise, r["title"]) for r in rows]
@@ -707,7 +729,7 @@ def run(
             )
         }
         names = {name for name, _, _ in search_jobs(s)}
-        done_f = {k for k in quiet_f - got["deferred"] if (franchise_jobs(k) & names) <= whole}
+        done_f = {k for k in quiet_f if (franchise_jobs(k) & names) <= whole}
         if done_f or db.get("baselined_franchises", None) is None:
             db.put("baselined_franchises", sorted(set(known_f) | done_f))
         db.run(

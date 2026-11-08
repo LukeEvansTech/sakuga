@@ -159,6 +159,15 @@ REPRO_CEL = re.compile(
 )
 
 
+def scope(key: str) -> tuple[str, ...]:
+    """The franchises one cel may be filed under: Broly, Vegeta and Goku share Dragon Ball cels (a
+    cel of both is Vegeta by one title, Goku by another), so a relist is matched across all three.
+    """
+    if FRANCHISES[key].get("dragonball"):
+        return tuple(k for k, f in FRANCHISES.items() if f.get("dragonball"))
+    return (key,)
+
+
 # In Dragon Ball titles セル alone is Cell (セル編, VS セル 完全体), not a cel.
 DB_CELL = re.compile(r"セル(?!画)")
 NOT_EVA = re.compile(r"エヴァーガーデン|エヴァーグリーン|エヴァー|エヴァンス")

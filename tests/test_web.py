@@ -581,9 +581,28 @@ def test_hinted_listing_needs_a_photo_and_keeps_its_franchise_quiet(env, monkeyp
     monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("", ""))
     typo = Raw("yahoo:o3", "Yahoo", "エゥンゲリオン セル画", "https://example.invalid/o", yen=60000)
     typo = dataclasses.replace(typo, cel_category=True, auction=True, hint="kiki")
-    got = sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "other"}), [typo], 200.0, False)
+    say = _Says({"kind": "cel", "franchise": "kiki"})
+    sweep.ingest(db, s, say, [typo], 200.0, False, quiet_franchises={"kiki"})
     assert db.one("SELECT id FROM listings WHERE id = 'yahoo:o3'") is None  # no photo: no verdict
-    assert got["deferred"] == {"kiki"}
+    assert db.get(sweep.QUIET_HELD, []) == ["yahoo:o3"]
+    # the photo arrives after Kiki finished its first read: the cel is still not news
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("o.jpg", "0f0f0f0f0f0f0f0f"))
+    got = sweep.ingest(db, s, say, [typo], 200.0, False)
+    assert not got["new_cels"] and db.get(sweep.QUIET_HELD, None) == []
+    assert db.one("SELECT baseline FROM cels WHERE franchise = 'kiki'")["baseline"] == 1
+
+
+def test_dragon_ball_relist_under_another_character_joins_the_cel(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("d.jpg", "00ff00ff00ff00ff"))
+    both = Raw(
+        "yahoo:d1", "Yahoo", "ドラゴンボール 孫悟空 ベジータ セル画", "https://example.invalid/d"
+    )
+    one = Raw("mercari:d2", "Mercari", "ドラゴンボール 孫悟空 セル画", "https://example.invalid/e")
+    llm = LLM("", "", "claude")
+    first = sweep.ingest(db, s, llm, [dataclasses.replace(both, yen=90000)], 200.0, False)
+    again = sweep.ingest(db, s, llm, [dataclasses.replace(one, yen=90000)], 200.0, False)
+    assert first["new_cels"] and not again["new_cels"]  # filed as Vegeta, then as Goku: one cel
 
 
 def test_backfill_keeps_the_category_rule(env):
