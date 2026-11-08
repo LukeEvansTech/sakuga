@@ -32,7 +32,13 @@ LAST_HTML = "mail_last_html"  # kv: the last sent email, with web photo links
 LAST_RESULT = "mail_last_result"
 MAX_CELS = 40  # per email; the rest are a link to the Today page
 THUMB = 240  # px, longest side
-CODES = {"Yahoo": "Y", "Mercari": "M", "Mandarake": "S", "Mandarake auction": "A", "eBay": "E"}
+CODES = {
+    "Yahoo": "Y",
+    "Mercari": "M",
+    "Mandarake": "S",
+    "Mandarake auction": "A",
+    "eBay": "E",
+}
 HERE = Path(__file__).resolve().parent
 ENV = Environment(
     loader=FileSystemLoader(HERE / "templates"), autoescape=select_autoescape(["html"])
@@ -188,9 +194,7 @@ def send(s: Settings, g: dict) -> str:
             data = _thumb(s.img_dir / c["image"])
             if data:
                 cids[c["image"]] = (make_msgid(domain="sakuga")[1:-1], data)
-    html, text = render(
-        s, g, lambda c: f"cid:{cids[c['image']][0]}" if c["image"] in cids else ""
-    )
+    html, text = render(s, g, lambda c: f"cid:{cids[c['image']][0]}" if c["image"] in cids else "")
     msg = EmailMessage()
     msg["Subject"] = subject(g)
     msg["From"] = formataddr(("Sakuga", s.mail_from))

@@ -9,7 +9,7 @@ from PIL import Image
 from sakuga import mail, notify, sweep
 from sakuga.web import create_app
 
-from tests.test_web import T, env  # noqa: F401  pylint: disable=unused-import
+from tests.conftest import T
 
 
 class FakeSMTP:
@@ -17,7 +17,7 @@ class FakeSMTP:
     fail = False
 
     def __init__(self, host, port, timeout=0):
-        self.host = host
+        self.host, self.port, self.timeout = host, port, timeout
 
     def __enter__(self):
         if FakeSMTP.fail:
@@ -39,7 +39,7 @@ class FakeSMTP:
 
 
 @pytest.fixture
-def mailed(env, monkeypatch):  # noqa: F811  pylint: disable=redefined-outer-name
+def mailed(env, monkeypatch):  # pylint: disable=redefined-outer-name
     s, db = env
     s = dataclasses.replace(
         s,
@@ -53,7 +53,7 @@ def mailed(env, monkeypatch):  # noqa: F811  pylint: disable=redefined-outer-nam
     return s, db
 
 
-def test_off_until_configured(env):  # noqa: F811  pylint: disable=redefined-outer-name
+def test_off_until_configured(env):  # pylint: disable=redefined-outer-name
     s, db = env
     assert not s.mail_on
     assert mail.run(db, s) == "off"
@@ -61,7 +61,9 @@ def test_off_until_configured(env):  # noqa: F811  pylint: disable=redefined-out
     assert len(sweep.pending(db)) == 2
 
 
-def test_email_alone_delivers_the_digest(mailed):  # pylint: disable=redefined-outer-name
+def test_email_alone_delivers_the_digest(
+    mailed,
+):  # pylint: disable=redefined-outer-name
     s, db = mailed
     img = io.BytesIO()
     Image.new("RGB", (800, 600), "white").save(img, "JPEG")

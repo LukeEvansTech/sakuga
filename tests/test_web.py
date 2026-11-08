@@ -3,9 +3,8 @@
 import dataclasses
 import datetime as dt
 
-import pytest
 from fastapi.testclient import TestClient
-from sakuga import config, notify, sweep
+from sakuga import notify, sweep
 from sakuga.db import DB
 from sakuga.llm import LLM
 from sakuga.sources import Raw
@@ -13,39 +12,6 @@ from sakuga.web import create_app
 
 # Relative to now: retire() compares last_seen with the real clock.
 T = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
-
-
-@pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("SAKUGA_DATA", str(tmp_path))
-    s = config.load()
-    db = DB(s.db_path)
-    for cel_id, baseline in ((1, 1), (2, 0), (3, 0)):
-        db.run(
-            "INSERT INTO cels (id, franchise, kind, title_en, title_jp, baseline, first_seen, last_seen)"
-            " VALUES (?, 'eva', 'cel', ?, 'セル画　綾波レイ', ?, ?, ?)",
-            cel_id,
-            f"Rei Ayanami {cel_id}",
-            baseline,
-            T,
-            T,
-        )
-        db.run(
-            "INSERT INTO listings (id, source, cel_id, title, url, yen, franchise, kind, first_seen, last_seen)"
-            " VALUES (?, ?, ?, 'セル画', 'https://example.invalid/x', 120000, 'eva', 'cel', ?, ?)",
-            f"yahoo:a{cel_id}",
-            "Yahoo",
-            cel_id,
-            T,
-            T,
-        )
-    db.run(
-        "INSERT INTO listings (id, source, cel_id, title, url, yen, franchise, kind, first_seen, last_seen)"
-        " VALUES ('mercari:m3', 'Mercari', 3, 'セル画', 'https://example.invalid/m', 99000, 'eva', 'cel', ?, ?)",
-        T,
-        T,
-    )
-    return s, db
 
 
 def test_pages_render(env):
@@ -82,7 +48,9 @@ def test_digest_marks_cels_only_after_send(env, monkeypatch):
     assert len(sweep.pending(db)) == 2
     sent = []
     monkeypatch.setattr(
-        notify, "send", lambda u, title, body, link, lt: sent.append((title, link)) or "sent"
+        notify,
+        "send",
+        lambda u, title, body, link, lt: sent.append((title, link)) or "sent",
     )
     assert sweep.digest(db, s) == "sent"
     assert sent[0][0] == "2 new cels today" and sent[0][1].endswith("/today")
@@ -113,7 +81,10 @@ def test_retire_needs_complete_reads_and_mercari_proof(env):
     db.run("UPDATE listings SET last_seen = '2026-01-01 09:00:00' WHERE id = 'mercari:m3'")
     sweep.retire(db, seen=set(), failed=set(), partial={"Mandarake"}, checked={})
     active = {r["id"] for r in db.all("SELECT id FROM listings WHERE active = 1")}
-    assert {"yahoo:a2", "mercari:m3"} <= active  # partial read; Mercari page not checked
+    assert {
+        "yahoo:a2",
+        "mercari:m3",
+    } <= active  # partial read; Mercari page not checked
     db.run("UPDATE listings SET last_seen = '2026-01-01 09:00:00' WHERE id = 'yahoo:a2'")
     sweep.retire(db, seen=set(), failed=set(), partial={"Mandarake"}, checked={})
     assert db.one("SELECT active FROM listings WHERE id = 'yahoo:a2'")["active"] == 1  # not by age
@@ -181,7 +152,13 @@ def test_pound_prices_meet_the_minimum(env):
 def test_known_listing_cut_below_the_floor_stays(env):
     s, db = env
     db.run("UPDATE listings SET source = 'Mandarake' WHERE id = 'yahoo:a2'")
-    cut = Raw("yahoo:a2", "Mandarake", "ポケモン セル画", "https://example.invalid/x", yen=2500)
+    cut = Raw(
+        "yahoo:a2",
+        "Mandarake",
+        "ポケモン セル画",
+        "https://example.invalid/x",
+        yen=2500,
+    )
     got = sweep.ingest(db, s, LLM("", "", "claude"), [cut], 200.0, False)
     assert got["seen"] == {"yahoo:a2"}
     assert db.one("SELECT yen FROM listings WHERE id = 'yahoo:a2'")["yen"] == 2500
@@ -210,7 +187,10 @@ def test_backfill_drops_cel_club_and_fills_titles(env):
     assert sweep.backfill(db, named, s) == 1  # yahoo:a1; answered listings are not asked again
     assert sweep.backfill(db, named, s) == 0
     cel = db.one("SELECT title_en, notes FROM cels WHERE id = 1")
-    assert (cel["title_en"], cel["notes"]) == ("Rei Ayanami 1", "no douga")  # fills blanks only
+    assert (cel["title_en"], cel["notes"]) == (
+        "Rei Ayanami 1",
+        "no douga",
+    )  # fills blanks only
 
 
 def test_backfill_rotates_failures_and_applies_gainax(env):
@@ -285,7 +265,11 @@ def _fake_collect(rounds):
 
     def collect(s, db, run_id, _check=None):
         for name, _, _ in sweep.search_jobs(s):
-            db.run("INSERT INTO run_sources (run_id, name, count) VALUES (?, ?, 0)", run_id, name)
+            db.run(
+                "INSERT INTO run_sources (run_id, name, count) VALUES (?, ?, 0)",
+                run_id,
+                name,
+            )
         return next(rounds), set(), set(), {}
 
     return collect
@@ -327,7 +311,10 @@ def test_a_new_source_starts_with_a_quiet_read(env, monkeypatch):
         r["title_jp"][:3]: r["baseline"]
         for r in db.all("SELECT title_jp, baseline FROM cels WHERE id > 3")
     }
-    assert base == {"Eva": 1, "エヴァ": 0}  # eBay's first read is quiet; Yahoo's news is not
+    assert base == {
+        "Eva": 1,
+        "エヴァ": 0,
+    }  # eBay's first read is quiet; Yahoo's news is not
     assert "eBay" in db.get("baselined_sources", [])
     sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
     assert db.one("SELECT baseline FROM cels WHERE title_jp LIKE 'Evangelion A%'")["baseline"] == 0
@@ -393,7 +380,9 @@ class _Seen(LLM):
 def _fake_photos(monkeypatch, names):
     """Photos by URL: a name downloads, '' is gone for good, None fails this time."""
     monkeypatch.setattr(
-        sweep.images, "download", lambda url, *_a, **_k: (names.get(url) or "", "0f0f0f0f0f0f0f0f")
+        sweep.images,
+        "download",
+        lambda url, *_a, **_k: (names.get(url) or "", "0f0f0f0f0f0f0f0f"),
     )
     monkeypatch.setattr(sweep.images, "download_more", lambda url, *_a, **_k: names.get(url, ""))
 
@@ -429,9 +418,29 @@ def test_a_kept_listing_is_asked_again_once_its_photos_arrive(env, monkeypatch):
         T,
     )
     again = [
-        Raw("yahoo:a4", "Yahoo", "セル画", "https://example.invalid/x", photos=["p2", "p4"]),
-        Raw("yahoo:a2", "Yahoo", "セル画", "https://example.invalid/x", yen=120000, photos=["p2"]),
-        Raw("yahoo:a1", "Yahoo", "セル画", "https://example.invalid/x", yen=120000, photos=[]),
+        Raw(
+            "yahoo:a4",
+            "Yahoo",
+            "セル画",
+            "https://example.invalid/x",
+            photos=["p2", "p4"],
+        ),
+        Raw(
+            "yahoo:a2",
+            "Yahoo",
+            "セル画",
+            "https://example.invalid/x",
+            yen=120000,
+            photos=["p2"],
+        ),
+        Raw(
+            "yahoo:a1",
+            "Yahoo",
+            "セル画",
+            "https://example.invalid/x",
+            yen=120000,
+            photos=[],
+        ),
         Raw("yahoo:a3", "Yahoo", "セル画", "https://example.invalid/x", yen=120000),  # not gathered
     ]
     sweep.ingest(db, s, _Seen(None), again, 200.0, False)
@@ -440,7 +449,11 @@ def test_a_kept_listing_is_asked_again_once_its_photos_arrive(env, monkeypatch):
     assert got["yahoo:a2"] == ('["seal.jpg"]', 1, 1)
     assert got["yahoo:a1"] == ("[]", 0, 1)  # nothing more to see: no second call
     assert got["yahoo:a3"] == (None, 0, 0)  # gathered next sweep
-    assert got["yahoo:a4"] == ('["seal.jpg"]', 1, 0)  # seen now; p4 failed and is fetched again
+    assert got["yahoo:a4"] == (
+        '["seal.jpg"]',
+        1,
+        0,
+    )  # seen now; p4 failed and is fetched again
     _fake_photos(monkeypatch, {"p2": "seal.jpg", "p4": "back.jpg"})
     sweep.ingest(db, s, _Seen(None), again[:1], 200.0, False)
     row = db.one("SELECT photos, photos_done FROM listings WHERE id = 'yahoo:a4'")
@@ -462,8 +475,20 @@ def test_photos_are_gathered_only_for_listings_the_llm_will_read(env):
         opened: list = []
 
     raws = [
-        Raw("mercari:m77", "Mercari", "エヴァンゲリオン セル画", "https://x.invalid", yen=9000),
-        Raw("mercari:m78", "Mercari", "エヴァンゲリオン ポスター", "https://x.invalid", yen=9000),
+        Raw(
+            "mercari:m77",
+            "Mercari",
+            "エヴァンゲリオン セル画",
+            "https://x.invalid",
+            yen=9000,
+        ),
+        Raw(
+            "mercari:m78",
+            "Mercari",
+            "エヴァンゲリオン ポスター",
+            "https://x.invalid",
+            yen=9000,
+        ),
         Raw("yahoo:a1", "Yahoo", "セル画", "https://x.invalid"),  # photos already stored
         Raw("mercari:m3", "Mercari", "セル画", "https://x.invalid"),  # kept, never gathered
     ]
@@ -484,7 +509,13 @@ def test_item_pages_go_to_new_listings_then_the_longest_waiting(env, monkeypatch
     raws = [
         Raw("yahoo:a1", "Yahoo", "セル画", "https://x.invalid"),
         Raw("yahoo:a2", "Yahoo", "セル画", "https://x.invalid"),
-        Raw("yahoo:new", "Yahoo", "エヴァンゲリオン セル画", "https://x.invalid", yen=9000),
+        Raw(
+            "yahoo:new",
+            "Yahoo",
+            "エヴァンゲリオン セル画",
+            "https://x.invalid",
+            yen=9000,
+        ),
     ]
     sweep.gather_photos(None, db, raws)
     assert opened == ["yahoo:new", "yahoo:a2"]  # yahoo:a1 had its turn most recently
