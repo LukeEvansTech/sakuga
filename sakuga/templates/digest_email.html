@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+{# The daily email, email-safe: tables and inline styles only. Graphite like the app, dark in every
+   client (it declares only a dark scheme, so clients have nothing to invert). g from mail.gather,
+   img(cel) -> src, link(path) -> absolute URL. #}
+{% set c = {'ground': '#141414', 'paper2': '#1d1d1d', 'rule': '#333333', 'ink': '#ece8e1', 'ink2': '#b5afa5', 'ink3': '#8a857d', 'biro': '#f5a524', 'bad': '#e8705a', 'gold': '#c9ad7a', 'paper': '#ece8e1'} %}
+{% set font = "-apple-system,'Hiragino Sans','Hiragino Kaku Gothic ProN',Meiryo,'Segoe UI',Arial,sans-serif" %}
+{% set narrow = "'Archivo Narrow','Arial Narrow',Arial,sans-serif" %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<title>{{ title }}</title>
+</head>
+<body style="margin:0;padding:0;background:{{ c.ground }};" bgcolor="{{ c.ground }}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{{ c.ground }}" style="background:{{ c.ground }};">
+<tr><td align="center" style="padding:0;">
+<div style="max-width:600px;margin:0 auto;padding:24px 20px;background:{{ c.ground }};color:{{ c.ink }};font-family:{{ font }};text-align:left;">
+
+  <p style="margin:0;font-family:{{ narrow }};font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:{{ c.gold }};">Sakuga &nbsp;·&nbsp; {{ g.now.strftime('%a %-d %b') }}</p>
+  <h1 style="margin:6px 0 6px;font-size:26px;line-height:32px;font-weight:700;color:{{ c.ink }};">
+    {%- if g.cels %}<span style="color:{{ c.biro }};">{{ g.cels | length }}</span> new cel{{ 's' if g.cels | length != 1 }}{% else %}No new cels{% endif %}</h1>
+  <p style="margin:0;font-size:14px;line-height:21px;color:{{ c.ink2 }};">
+    {%- if g.by %}{% for label, n in g.by %}{{ n }} {{ label }}{{ ', ' if not loop.last else '. ' }}{% endfor %}{% endif -%}
+    {{ g.available }} for sale in all.
+  </p>
+  <p style="margin:6px 0 0;font-size:13px;line-height:19px;color:{{ c.ink3 }};">
+    {%- if g.runs == 0 %}<b style="color:{{ c.bad }};">No sweeps ran since the last email.</b>
+    {%- elif g.bad_runs %}<b style="color:{{ c.bad }};">{{ g.bad_runs }} of {{ g.runs }} sweeps failed or were cut off.</b> <a href="{{ link('/log') }}" style="color:{{ c.biro }};">See the Log</a>.
+    {%- else %}{{ g.runs }} sweep{{ 's' if g.runs != 1 }} ran{% if g.cost %}, LLM ${{ '%.2f' % g.cost }}{% endif %}.{% endif %}
+    {%- if g.failed_sources %} Failed searches, each tried again next sweep: {% for name, n in g.failed_sources %}{{ name }} {{ n }}×{{ ', ' if not loop.last }}{% endfor %}.{% endif %}
+  </p>
+
+  {% if g.cels %}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:20px;">
+  {% for cel in g.cels %}
+  {% set href = link('/cel/' ~ cel.id) %}
+  <tr>
+    <td width="108" valign="top" style="padding:12px 12px 12px 0;border-top:1px solid {{ c.rule }};">
+      {% set src = img(cel) %}
+      <a href="{{ href }}" style="display:block;width:96px;background:{{ c.paper }};{% if cel.gainax %}outline:2px solid {{ c.biro }};{% endif %}">
+        {%- if src %}<img src="{{ src }}" width="96" alt="" style="display:block;width:96px;height:auto;border:0;">
+        {%- else %}<span style="display:block;width:96px;height:96px;line-height:96px;text-align:center;font-size:11px;color:#555;">No photo</span>{% endif -%}
+      </a>
+    </td>
+    <td valign="top" style="padding:12px 0;border-top:1px solid {{ c.rule }};font-size:14px;line-height:20px;color:{{ c.ink }};">
+      <span style="font-family:{{ narrow }};font-size:12px;letter-spacing:0.1em;text-transform:uppercase;color:{{ c.gold }};">{{ cel.code }} &nbsp;{{ cel.label }}{% if cel.kind != 'cel' %} · {{ cel.kind }}{% endif %}{% if cel.gainax %} · <span style="color:{{ c.biro }};">GAINAX limited</span>{% endif %}</span><br>
+      <a href="{{ href }}" style="color:{{ c.ink }};font-weight:600;font-size:15px;text-decoration:none;">{{ cel.title }}</a><br>
+      <span style="font-family:{{ narrow }};font-size:17px;font-weight:700;color:{{ c.ink }};">
+        {%- if cel.yen %}¥{{ '{:,}'.format(cel.yen) }}{% if cel.gbp %}<span style="font-size:13px;font-weight:400;color:{{ c.ink2 }};"> ~£{{ '{:,.0f}'.format(cel.gbp) }}</span>{% endif %}
+        {%- elif cel.gbp %}£{{ '{:,.0f}'.format(cel.gbp) }}{% else %}<span style="font-size:13px;font-weight:400;color:{{ c.ink2 }};">No price</span>{% endif %}</span>
+      <span style="font-size:13px;color:{{ c.ink2 }};">&nbsp;{{ 'auction' if cel.auction else 'fixed price' }}{% if cel.sources %} · {{ cel.sources | join(', ') }}{% endif %}</span>
+      {% if cel.notes %}<br><span style="font-size:13px;line-height:18px;color:{{ c.ink3 }};">{{ cel.notes }}</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </table>
+  {% endif %}
+
+  <p style="margin:28px 0 0;padding-top:16px;border-top:1px solid {{ c.rule }};font-size:13px;color:{{ c.ink3 }};">
+    <a href="{{ link('/today') }}" style="color:{{ c.biro }};">Today</a> &nbsp;·&nbsp; <a href="{{ link('/catalogue') }}" style="color:{{ c.biro }};">Catalogue</a> &nbsp;·&nbsp; <a href="{{ link('/digest/last') }}" style="color:{{ c.biro }};">This email on the web</a>
+  </p>
+</div>
+</td></tr>
+</table>
+</body>
+</html>

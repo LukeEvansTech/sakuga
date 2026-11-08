@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import scheduler, sweep
+from . import mail, scheduler, sweep
 from .config import Settings
 from .db import DB
 from .filters import FRANCHISES
@@ -254,7 +254,24 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
             "SELECT COALESCE(SUM(llm_cost),0) c, COALESCE(SUM(llm_calls),0) n FROM runs"
             " WHERE started >= datetime('now','-30 days')"
         )
-        return page(request, "log.html", "log", runs=runs, digests=digests, spend=spend)
+        return page(
+            request,
+            "log.html",
+            "log",
+            runs=runs,
+            digests=digests,
+            spend=spend,
+            mail_on=s.mail_on,
+            mail_result=db.get(mail.LAST_RESULT, ""),
+            mail_sent=bool(db.get(mail.LAST_HTML, "")),
+        )
+
+    @app.get("/digest/last", response_class=HTMLResponse)
+    def digest_last():
+        html = db.get(mail.LAST_HTML, "")
+        if not html:
+            raise HTTPException(404, "no digest email has been sent yet")
+        return HTMLResponse(html)
 
     @app.post("/sweep")
     def sweep_now():
