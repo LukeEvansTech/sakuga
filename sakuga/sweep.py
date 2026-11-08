@@ -761,11 +761,11 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
     r = "sent" if "sent" in (push, email) else push if push != "off" else email
     # Only what a channel delivered: Pushover sent `cels`, the email its own list. A cel emailed
     # earlier whose marking was cut off (a restart) is caught here too.
-    done = {c["id"] for c in cels} if push == "sent" else set(mailed)
-    done |= {
+    # pending() is read after the email, so every cel it newly carried is in `cels`.
+    done = {
         c["id"]
         for c in cels
-        if c["id"] in mailed or (c["mailed"] and c["mailed"] != "before email")
+        if push == "sent" or c["id"] in mailed or (c["mailed"] and c["mailed"] != "before email")
     }
     if done:
         did = db.run(
