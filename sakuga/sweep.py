@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import catalog, ebay, filters, images, notify
+from . import catalog, ebay, filters, images, mail, notify
 from .config import Settings
 from .db import DB
 from .llm import LLM
@@ -471,7 +471,8 @@ def regroup(db: DB, llm: LLM, s: Settings, raw: Raw, cel_id: int, image: str, ph
     with NOTIFY_LOCK:
         cel = db.one("SELECT * FROM cels WHERE id = ?", cel_id)
         n = db.one("SELECT COUNT(*) n FROM listings WHERE cel_id = ?", cel_id)
-        if not cel or not n or n["n"] != 1 or cel["digest_id"] or cel["instant_sent"]:
+        announced = cel and (cel["digest_id"] or cel["instant_sent"] or cel["mailed"])
+        if not cel or not n or n["n"] != 1 or announced:
             return
         match = catalog.group(
             ph,
@@ -597,7 +598,7 @@ def _instant(db: DB, s: Settings) -> list[str]:
     out = []
     for cel in db.all(
         "SELECT * FROM cels WHERE gainax = 1 AND baseline = 0 AND instant_sent IS NULL AND rejected = 0"
-        " AND digest_id IS NULL"
+        " AND digest_id IS NULL AND mailed IS NULL"  # the email may have carried it already
     ):
         cel_id = cel["id"]
         lst = db.one(
@@ -725,11 +726,14 @@ def digest(db: DB, s: Settings, notify_on: bool = True) -> str:
 
 
 def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
-    """The daily alert: one message for every cel first seen since the last one. Nothing new, no alert."""
+    """The daily alert: one Pushover message for every cel first seen since the last one (nothing
+    new, no message), and the daily email, which goes every day. The cels are marked as digested
+    once either channel delivered them."""
+    email, mailed = mail.run(db, s) if notify_on else ("off", [])
     cels = pending(db)
     if not cels:
-        log.info("digest: nothing new")
-        return "nothing new"
+        log.info("digest: nothing new (email %s)", email)
+        return email if email.startswith("failed") else "nothing new"
     by: dict[str, int] = {}
     for c in cels:
         by[c["franchise"]] = by.get(c["franchise"], 0) + 1
@@ -748,16 +752,32 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
         )
     n = len(cels)
     title = f"{n} new cel{'s' if n != 1 else ''} today"
-    r = (
+    push = (
         notify.send(s.apprise_urls, title, "\n".join(lines), s.link("/today"), "See them")
         if notify_on
         else "off"
     )
-    if r == "sent":  # marked only after the send succeeded; "off" keeps them pending
-        did = db.run("INSERT INTO digests (created, cels, result) VALUES (?,?,?)", now(), n, r)
+    # "sent" if either channel delivered; "off" (both off) keeps them pending
+    r = "sent" if "sent" in (push, email) else push if push != "off" else email
+    # Only what a channel delivered: Pushover sent `cels`, the email its own list. A cel emailed
+    # earlier whose marking was cut off (a restart) is caught here too.
+    # pending() is read after the email, so every cel it newly carried is in `cels`.
+    done = {
+        c["id"]
+        for c in cels
+        if push == "sent" or c["id"] in mailed or (c["mailed"] and c["mailed"] != "before email")
+    }
+    if done:
+        did = db.run(
+            "INSERT INTO digests (created, cels, result) VALUES (?,?,?)",
+            now(),
+            len(done),
+            f"push {push}, email {email}",
+        )
         with db.tx() as con:
             con.executemany(
-                "UPDATE cels SET digest_id = ? WHERE id = ?", [(did, c["id"]) for c in cels]
+                "UPDATE cels SET digest_id = ? WHERE id = ? AND digest_id IS NULL",
+                [(did, i) for i in sorted(done)],
             )
     log.info("digest of %d cels: %s", n, r)
     return r

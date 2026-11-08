@@ -17,6 +17,7 @@ sweep (every 30 min) ─▶ Buyee / Mercari / Mandarake shop + auctions (headles
                      ─▶ same cel as one already catalogued? (pHash; LLM compares borderline photos)
                      ─▶ listings not seen any more retire; a cel stays available while any listing is
 digest (08:00)       ─▶ one alert for the cels first seen since the last digest
+                     ─▶ the daily email, every day: new cels with photos, and sweep health
 ```
 
 - **Cel and listing.** A listing is one sighting on one site; a cel is the artwork. A relist, or the
@@ -51,6 +52,10 @@ Docker: `docker build -t sakuga .` then
 | `SAKUGA_DIGEST`           | `0 8 * * *`     | Cron for the daily digest.                                                 |
 | `SAKUGA_TZ`               | `Europe/London` | Timezone both crons are read in.                                           |
 | `APPRISE_URLS`            | none            | Comma-separated Apprise URLs. Empty sends nothing.                         |
+| `SAKUGA_SMTP_HOST`        | none            | SMTP relay for the daily email (STARTTLS when offered). Empty: no email.   |
+| `SAKUGA_SMTP_PORT`        | `25`            | Port on that relay.                                                        |
+| `SAKUGA_MAIL_FROM`        | none            | Sender address of the daily email.                                         |
+| `SAKUGA_DIGEST_TO`        | none            | Recipient of the daily email; it also needs `SAKUGA_PUBLIC_URL`.           |
 | `SAKUGA_LLM_URL`          | none            | OpenAI-compatible endpoint. Empty: regular expression filter only, no LLM. |
 | `SAKUGA_LLM_KEY`          | none            | Bearer key for that endpoint.                                              |
 | `SAKUGA_LLM_MODEL`        | `claude`        | Model name; it must accept images.                                         |
@@ -63,4 +68,5 @@ Docker: `docker build -t sakuga .` then
 
 `/today` (new since the last digest, and the last digest), `/catalogue` (filters and sorts),
 `/cel/<id>` (photos, every sighting, price history), `/log` (each sweep and its sources),
+`/digest/last` (the last daily email, with linked photos),
 `/health`, `/metrics`. The UI has no login: run it behind an internal-only route.
