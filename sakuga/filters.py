@@ -93,7 +93,7 @@ FRANCHISES: dict[str, dict[str, Any]] = {
         "label": "Kiki",
         "name": "Kiki's Delivery Service",
         "jp": ["魔女の宅急便"],
-        "en": ["kiki's delivery", "kikis delivery", "majo no takkyubin"],
+        "en": ["kiki's delivery", "kiki’s delivery", "kikis delivery", "majo no takkyubin"],
         "buyee": ["魔女の宅急便"],
         "mercari": ["魔女の宅急便 セル画"],
         "category": "2084035786",

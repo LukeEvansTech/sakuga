@@ -103,6 +103,7 @@ CEL_CATEGORY = "2084005356"  # Yahoo's セル画
 BUYEE_PAGE = 100  # cards on one Buyee results page
 BUYEE_PAGES = 5  # pages read per search; more is a partial read
 NOT_FOUND = ".bidNotfound_middle"  # Buyee's no-results panel (checked 2026-11-08)
+MERCARI_EMPTY = '[data-testid="item-grid-empty-state"]'  # "出品された商品がありません" (2026-11-08)
 
 
 def _buyee_page(page, url: str) -> list[dict]:
@@ -174,7 +175,9 @@ def mercari(page, q: str) -> list[Raw]:
         f"https://jp.mercari.com/search?keyword={urllib.parse.quote(q)}"
         "&status=on_sale&sort=created_time&order=desc"
     )
-    _load(page, url, 'li[data-testid="item-cell"]')
+    _load(page, url, f'li[data-testid="item-cell"], {MERCARI_EMPTY}')
+    if not page.query_selector('li[data-testid="item-cell"]'):
+        return []  # Mercari's own empty-grid notice: an empty search, not a failed load
     _scroll_to_bottom(page)
     rows = page.evaluate("""() => [...document.querySelectorAll('li[data-testid="item-cell"]')]
       .map(li => { const a = li.querySelector('a'); const img = li.querySelector('img');

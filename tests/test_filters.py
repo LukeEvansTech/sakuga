@@ -142,3 +142,8 @@ def test_category_hint_names_only_a_title_that_names_none():
     assert (
         classify("美少女戦士セーラームーン 同人 セル画", "", 9000, True, True, hint="eva") is None
     )
+
+
+def test_kiki_with_a_typographic_apostrophe():
+    c = classify("Kiki’s Delivery Service production cel", "", 10000, False, False, english=True)
+    assert c and c["franchise"] == "kiki"
