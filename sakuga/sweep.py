@@ -41,9 +41,8 @@ def search_jobs(s: Settings) -> list:
 
 
 def franchise_jobs(key: str) -> set[str]:
-    """Every search that can find a franchise's listings, by job name: its own browser and eBay
-    searches, and Mandarake's two, which read every cel."""
-    return sources.job_names(key) | ebay.job_names(key) | MANDARAKE_JOBS
+    """A franchise's own searches, browser and eBay, by job name."""
+    return sources.job_names(key) | ebay.job_names(key)
 
 
 def collect(
@@ -729,7 +728,13 @@ def run(
             )
         }
         names = {name for name, _, _ in search_jobs(s)}
-        done_f = {k for k in quiet_f if (franchise_jobs(k) & names) <= whole}
+        # Mandarake's two lists hold every franchise's cels and often stop at their cap, so for them
+        # a read is enough: requiring a whole one would keep a new franchise quiet for good.
+        done_f = {
+            k
+            for k in quiet_f
+            if (franchise_jobs(k) & names) <= whole and (MANDARAKE_JOBS & names) <= read_ok
+        }
         if done_f or db.get("baselined_franchises", None) is None:
             db.put("baselined_franchises", sorted(set(known_f) | done_f))
         db.run(

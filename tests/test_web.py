@@ -550,7 +550,7 @@ def test_a_franchise_is_baselined_once_all_its_searches_read(env, monkeypatch):
     db.put("baselined_franchises", ["broly", "fma", "eva", "pokemon"])
     monkeypatch.setattr(sweep, "backfill", lambda *a, **k: 0)
     failing = {"mercari:魔女の宅急便 セル画"}
-    capped = {"buyee:悟空"}
+    capped = {"buyee:悟空", "mandarake-shop"}  # Mandarake at its cap still counts as read
 
     def collect(_s, db_, run_id, _check=None):
         for name, _, _ in sweep.search_jobs(_s):
