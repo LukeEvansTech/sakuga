@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import catalog, ebay, filters, images, notify
+from . import catalog, ebay, filters, images, mail, notify
 from .config import Settings
 from .db import DB
 from .llm import LLM
@@ -725,10 +725,13 @@ def digest(db: DB, s: Settings, notify_on: bool = True) -> str:
 
 
 def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
-    """The daily alert: one message for every cel first seen since the last one. Nothing new, no alert."""
+    """The daily alert: one Pushover message for every cel first seen since the last one (nothing
+    new, no message), and the daily email, which goes every day. The cels are marked as digested
+    once either channel delivered them."""
     cels = pending(db)
+    email = mail.run(db, s) if notify_on else "off"
     if not cels:
-        log.info("digest: nothing new")
+        log.info("digest: nothing new (email %s)", email)
         return "nothing new"
     by: dict[str, int] = {}
     for c in cels:
@@ -748,13 +751,20 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
         )
     n = len(cels)
     title = f"{n} new cel{'s' if n != 1 else ''} today"
-    r = (
+    push = (
         notify.send(s.apprise_urls, title, "\n".join(lines), s.link("/today"), "See them")
         if notify_on
         else "off"
     )
-    if r == "sent":  # marked only after the send succeeded; "off" keeps them pending
-        did = db.run("INSERT INTO digests (created, cels, result) VALUES (?,?,?)", now(), n, r)
+    # "sent" if either channel delivered; "off" (both off) keeps them pending
+    r = "sent" if "sent" in (push, email) else push if push != "off" else email
+    if r == "sent":
+        did = db.run(
+            "INSERT INTO digests (created, cels, result) VALUES (?,?,?)",
+            now(),
+            n,
+            f"push {push}, email {email}",
+        )
         with db.tx() as con:
             con.executemany(
                 "UPDATE cels SET digest_id = ? WHERE id = ?", [(did, c["id"]) for c in cels]

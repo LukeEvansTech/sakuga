@@ -6,6 +6,7 @@
     <div><dt>Last sweep</dt><dd>{% if last_run %}{{ last_run.status | capitalize }}, {{ last_run.finished | local }}{% else %}None yet{% endif %}</dd></div>
     <div><dt>LLM, last 30 days</dt><dd class="num">{{ spend.n }} calls · ${{ '%.2f' % spend.c }}</dd></div>
     <div><dt>Schedule</dt><dd>Sweeps <code>{{ schedule }}</code> · digest <code>{{ digest_schedule }}</code> ({{ tz }})</dd></div>
+    <div><dt>Digest email</dt><dd>{% if not mail_on %}Not set up{% elif mail_result %}{{ mail_result }}{% else %}Not sent yet{% endif %}{% if mail_sent %} · <a href="/digest/last">last one</a>{% endif %}</dd></div>
   </dl>
   <form method="post" action="/sweep"><button type="submit" {{ 'disabled' if running }}>{{ 'Sweeping…' if running else 'Sweep now' }}</button></form>
 </section>

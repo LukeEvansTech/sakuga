@@ -22,6 +22,11 @@ class Settings:
     digest_schedule: str = field(default_factory=lambda: _env("SAKUGA_DIGEST", "0 8 * * *"))
     timezone: str = field(default_factory=lambda: _env("SAKUGA_TZ", "Europe/London"))
     apprise_urls: str = field(default_factory=lambda: os.environ.get("APPRISE_URLS", ""))
+    # The digest also goes by email through an SMTP relay; off until host, sender and recipient are set.
+    smtp_host: str = field(default_factory=lambda: os.environ.get("SAKUGA_SMTP_HOST", ""))
+    smtp_port: int = field(default_factory=lambda: int(_env("SAKUGA_SMTP_PORT", "25")))
+    mail_from: str = field(default_factory=lambda: os.environ.get("SAKUGA_MAIL_FROM", ""))
+    digest_to: str = field(default_factory=lambda: os.environ.get("SAKUGA_DIGEST_TO", ""))
     # OpenAI-compatible endpoint (the cluster's LiteLLM proxy). Empty URL: no LLM, regex filter only.
     llm_url: str = field(default_factory=lambda: os.environ.get("SAKUGA_LLM_URL", "").rstrip("/"))
     llm_key: str = field(default_factory=lambda: os.environ.get("SAKUGA_LLM_KEY", ""))
@@ -45,6 +50,11 @@ class Settings:
     @property
     def img_dir(self) -> Path:
         return self.data_dir / "img"
+
+    @property
+    def mail_on(self) -> bool:
+        # email links must be absolute, so the public URL is required too
+        return bool(self.smtp_host and self.mail_from and self.digest_to and self.public_url)
 
     def link(self, path: str) -> str:
         return f"{self.public_url}{path}" if self.public_url else path
