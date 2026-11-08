@@ -124,8 +124,8 @@ class DB:
                 c.execute("ALTER TABLE cels ADD COLUMN mailed TEXT")
                 # what Pushover already announced is not news to the first email
                 c.execute(
-                    "UPDATE cels SET mailed = 'before email' WHERE baseline = 1"
-                    " OR digest_id IS NOT NULL OR instant_sent IS NOT NULL"
+                    "UPDATE cels SET mailed = 'before email'"
+                    " WHERE digest_id IS NOT NULL OR instant_sent IS NOT NULL"
                 )
             if "asked" not in cols:  # when backfill last asked the LLM about this listing
                 c.execute("ALTER TABLE listings ADD COLUMN asked TEXT")

@@ -770,5 +770,11 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
             con.executemany(
                 "UPDATE cels SET digest_id = ? WHERE id = ?", [(did, c["id"]) for c in cels]
             )
+            if email == "sent":  # a cel a concurrent sweep added after pending() went by email
+                con.execute(
+                    "UPDATE cels SET digest_id = ? WHERE digest_id IS NULL AND baseline = 0"
+                    " AND mailed IS NOT NULL",
+                    (did,),
+                )
     log.info("digest of %d cels: %s", n, r)
     return r

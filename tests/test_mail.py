@@ -62,19 +62,31 @@ def test_off_until_configured(env):  # pylint: disable=redefined-outer-name
     assert len(sweep.pending(db)) == 2
 
 
-def test_email_alone_delivers_the_digest(
-    mailed,
-):  # pylint: disable=redefined-outer-name
+# pylint: disable-next=redefined-outer-name
+def test_email_alone_delivers_the_digest(mailed, monkeypatch):
     s, db = mailed
     img = io.BytesIO()
     Image.new("RGB", (800, 600), "white").save(img, "JPEG")
     (s.img_dir / ("a" * 24 + ".jpg")).write_bytes(img.getvalue())
     db.run("UPDATE cels SET image = ? WHERE id = 2", "a" * 24 + ".jpg")
 
+    real_run = mail.run
+
+    def late_cel(db_, s_):  # a sweep adds a cel between pending() and the email
+        db_.run(
+            "INSERT INTO cels (id, franchise, kind, title_en, first_seen, last_seen)"
+            " VALUES (9, 'eva', 'cel', 'Late', ?, ?)",
+            T,
+            T,
+        )
+        return real_run(db_, s_)
+
+    monkeypatch.setattr(mail, "run", late_cel)
     assert sweep.digest(db, s) == "sent"
-    assert sweep.pending(db) == []  # marked: the email delivered them
+    assert sweep.pending(db) == []  # marked: the email delivered them, the late one too
+    monkeypatch.setattr(mail, "run", real_run)
     msg = FakeSMTP.sent[-1]
-    assert msg["Subject"] == "Sakuga: 2 new cels (2 Eva)"
+    assert msg["Subject"] == "Sakuga: 3 new cels (3 Eva)"
     html = msg.get_body(("html",)).get_content()
     assert "Rei Ayanami 2" in html and "Rei Ayanami 3" in html
     assert "Rei Ayanami 1" not in html  # the first sweep's catalogue is not news
@@ -87,7 +99,7 @@ def test_email_alone_delivers_the_digest(
 
     # The next morning: nothing new, but the email still goes, and says so.
     assert sweep.digest(db, s) == "nothing new"
-    assert FakeSMTP.sent[-1]["Subject"] == "Sakuga: no new cels, 3 for sale"
+    assert FakeSMTP.sent[-1]["Subject"] == "Sakuga: no new cels, 4 for sale"
 
 
 def test_failed_email_keeps_its_start(mailed, monkeypatch):  # pylint: disable=redefined-outer-name
@@ -158,6 +170,7 @@ def test_migration_marks_what_pushover_announced(tmp_path):
     con.close()
     db = DB(path)
     assert [c["id"] for c in mail.gather(db)["cels"]] == [3]
+    assert db.one("SELECT mailed FROM cels WHERE id = 1")["mailed"] is None  # can still regroup
 
 
 def test_web_copy(mailed):  # pylint: disable=redefined-outer-name
