@@ -121,12 +121,16 @@ class DB:
             ):  # hidden by a later LLM verdict; kept for its id and history
                 c.execute("ALTER TABLE cels ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0")
             if "mailed" not in cel_cols:  # when the daily email carried it
+                # One transaction: the column must never exist without its backfill, or the
+                # first email would announce what Pushover already did.
+                c.commit()
+                c.execute("BEGIN")
                 c.execute("ALTER TABLE cels ADD COLUMN mailed TEXT")
-                # what Pushover already announced is not news to the first email
                 c.execute(
                     "UPDATE cels SET mailed = 'before email'"
                     " WHERE digest_id IS NOT NULL OR instant_sent IS NOT NULL"
                 )
+                c.execute("COMMIT")
             if "asked" not in cols:  # when backfill last asked the LLM about this listing
                 c.execute("ALTER TABLE listings ADD COLUMN asked TEXT")
             if "photos" not in cols:  # further photo files stored so far (JSON list)
