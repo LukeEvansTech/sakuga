@@ -147,3 +147,9 @@ def test_category_hint_names_only_a_title_that_names_none():
 def test_kiki_with_a_typographic_apostrophe():
     c = classify("Kiki’s Delivery Service production cel", "", 10000, False, False, english=True)
     assert c and c["franchise"] == "kiki"
+
+
+def test_goku_midnight_eye_is_not_dragon_ball():
+    assert (
+        classify("Goku Midnight Eye production cel", "", 10000, False, False, english=True) is None
+    )

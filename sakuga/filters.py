@@ -171,10 +171,11 @@ def scope(key: str) -> tuple[str, ...]:
 # In Dragon Ball titles セル alone is Cell (セル編, VS セル 完全体), not a cel.
 DB_CELL = re.compile(r"セル(?!画)")
 NOT_EVA = re.compile(r"エヴァーガーデン|エヴァーグリーン|エヴァー|エヴァンス")
-# The other Goku: Journey to the West and its anime (悟空の大冒険, 最遊記, ぼくの孫悟空), Gokudō (極道).
+# The other Goku: Journey to the West and its anime (悟空の大冒険, 最遊記, ぼくの孫悟空), Gokudō (極道),
+# Goku Midnight Eye (ミッドナイトアイ ゴクウ).
 # A title naming one of these is never Dragon Ball's Goku, whatever else it says.
 NOT_GOKU = re.compile(
-    r"悟空の大冒険|西遊記|最遊記|ぼくの孫悟空|saiyuki|journey\s+to\s+the\s+west|gokudo|goku\s+no\s+daiboken",
+    r"悟空の大冒険|西遊記|最遊記|ぼくの孫悟空|saiyuki|journey\s+to\s+the\s+west|gokudo|goku\s+no\s+daiboken|midnight\s*eye|ミッドナイトアイ",
     re.I,
 )
 
