@@ -57,7 +57,7 @@ def mailed(env, monkeypatch):  # pylint: disable=redefined-outer-name
 def test_off_until_configured(env):  # pylint: disable=redefined-outer-name
     s, db = env
     assert not s.mail_on
-    assert mail.run(db, s) == "off"
+    assert mail.run(db, s) == ("off", [])
     assert sweep.digest(db, s) == "off"  # no Pushover either: the cels stay pending
     assert len(sweep.pending(db)) == 2
 
@@ -115,7 +115,7 @@ def test_failed_email_keeps_its_start(mailed, monkeypatch):  # pylint: disable=r
     assert sweep.digest(db, s2) == "sent"
     assert sweep.pending(db) == []
     FakeSMTP.fail = False
-    assert mail.run(db, s) == "sent"
+    assert mail.run(db, s)[0] == "sent"
     assert FakeSMTP.sent[-1]["Subject"].startswith("Sakuga: 2 new cels")
 
     # A quiet day whose email fails is a failure, not "nothing new".
@@ -125,7 +125,7 @@ def test_failed_email_keeps_its_start(mailed, monkeypatch):  # pylint: disable=r
 
 def test_new_cel_after_an_email(mailed):  # pylint: disable=redefined-outer-name
     s, db = mailed
-    assert mail.run(db, s) == "sent"
+    assert mail.run(db, s)[0] == "sent"
     db.run(
         "INSERT INTO cels (id, franchise, kind, title_en, title_jp, gainax, first_seen, last_seen)"
         " VALUES (4, 'eva', 'cel', 'Kaworu', 'カヲル', 1, ?, ?)",

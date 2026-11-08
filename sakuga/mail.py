@@ -202,10 +202,11 @@ def send(s: Settings, g: dict) -> str:
     return "sent"
 
 
-def run(db: DB, s: Settings) -> str:
-    """Gather, send, and mark what it carried only when the email went. Off when unconfigured."""
+def run(db: DB, s: Settings) -> tuple[str, list[int]]:
+    """Gather, send, and mark what it carried only when the email went. Off when unconfigured.
+    Returns the result and the ids of the cels the email delivered."""
     if not s.mail_on:
-        return "off"
+        return "off", []
     g = gather(db)
     res = send(s, g)
     if res == "sent":
@@ -219,4 +220,4 @@ def run(db: DB, s: Settings) -> str:
         db.put(LAST_HTML, web)
     db.put(LAST_RESULT, f"{dt.datetime.now().isoformat(timespec='minutes')} {res}")
     log.info("digest email of %d cels: %s", len(g["cels"]), res)
-    return res
+    return res, [c["id"] for c in g["cels"]] if res == "sent" else []

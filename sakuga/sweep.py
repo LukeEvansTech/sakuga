@@ -729,8 +729,7 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
     """The daily alert: one Pushover message for every cel first seen since the last one (nothing
     new, no message), and the daily email, which goes every day. The cels are marked as digested
     once either channel delivered them."""
-    # Email first, then choose: every cel the email carried is in pending() and so gets marked.
-    email = mail.run(db, s) if notify_on else "off"
+    email, mailed = mail.run(db, s) if notify_on else ("off", [])
     cels = pending(db)
     if not cels:
         log.info("digest: nothing new (email %s)", email)
@@ -767,9 +766,12 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
             n,
             f"push {push}, email {email}",
         )
+        # only what a channel delivered: Pushover sent `cels`, the email its own list
+        done = set(mailed) | ({c["id"] for c in cels} if push == "sent" else set())
         with db.tx() as con:
             con.executemany(
-                "UPDATE cels SET digest_id = ? WHERE id = ?", [(did, c["id"]) for c in cels]
+                "UPDATE cels SET digest_id = ? WHERE id = ? AND digest_id IS NULL",
+                [(did, i) for i in sorted(done)],
             )
     log.info("digest of %d cels: %s", n, r)
     return r
