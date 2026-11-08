@@ -571,6 +571,7 @@ def test_a_franchise_is_baselined_once_all_its_searches_read(env, monkeypatch):
     assert "bebop" in db.get("baselined_franchises", [])
     assert "goku" not in db.get("baselined_franchises", [])  # stopped at its page cap
     failing.clear()
+    failing.add("buyee:魔女の宅急便")  # Kiki's Mercari read last sweep; its Yahoo search fails now
     capped.clear()
     sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
     assert set(db.get("baselined_franchises", [])) == set(sweep.FRANCHISES)

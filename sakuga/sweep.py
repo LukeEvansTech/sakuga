@@ -140,6 +140,7 @@ def _same_fn(db: DB, llm: LLM, img_dir: Path, listing_id: str, image: str):
 FIRST_SOURCES = ("Yahoo", "Mercari", "Mandarake", "Mandarake auction")
 QUIET_HELD = "quiet_held"  # kv: hinted listings first seen on a quiet read, not yet stored
 MAX_HELD = 2000
+QUIET_READS = "quiet_reads"  # kv: searches read whole since a franchise was added
 MANDARAKE_JOBS = {"mandarake-shop", "mandarake-auction"}
 # Likewise the franchises, before baselined_franchises existed.
 FIRST_FRANCHISES = ("broly", "fma", "eva", "pokemon")
@@ -730,11 +731,10 @@ def run(
         names = {name for name, _, _ in search_jobs(s)}
         # Mandarake's two lists hold every franchise's cels and often stop at their cap, so for them
         # a read is enough: requiring a whole one would keep a new franchise quiet for good.
-        done_f = {
-            k
-            for k in quiet_f
-            if (franchise_jobs(k) & names) <= whole and (MANDARAKE_JOBS & names) <= read_ok
-        }
+        # Reads add up across sweeps while any franchise is quiet: one failing search a sweep is enough.
+        reads = set(db.get(QUIET_READS, [])) | whole | (MANDARAKE_JOBS & read_ok)
+        done_f = {k for k in quiet_f if ((franchise_jobs(k) | MANDARAKE_JOBS) & names) <= reads}
+        db.put(QUIET_READS, sorted(reads) if quiet_f - done_f else [])
         if done_f or db.get("baselined_franchises", None) is None:
             db.put("baselined_franchises", sorted(set(known_f) | done_f))
         db.run(
