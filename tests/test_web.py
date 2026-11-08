@@ -513,3 +513,60 @@ def test_further_photos_wait_for_the_main_one(env, monkeypatch):
     sweep.ingest(db, s, llm, [raw], 200.0, False)  # the main photo arrives
     sweep.backfill(db, llm, s)
     assert ["main.jpg", "seal.jpg"] in llm.calls
+
+
+def test_hinted_listing_waits_for_the_llm_and_misfiled_ones_drop(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("h.jpg", "0f0f0f0f0f0f0f0f"))
+    typo = Raw("yahoo:o1", "Yahoo", "エゥンゲリオン セル画", "https://example.invalid/o", yen=60000)
+    typo = dataclasses.replace(typo, cel_category=True, auction=True, hint="eva")
+    sweep.ingest(db, s, _Says(None), [typo], 200.0, False)
+    assert db.one("SELECT id FROM listings WHERE id = 'yahoo:o1'") is None  # asked again next sweep
+    misfiled = dataclasses.replace(typo, id="yahoo:o2", title="王立宇宙軍 オネアミスの翼 セル画")
+    sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "other"}), [misfiled], 200.0, False)
+    row = db.one("SELECT ok, reason FROM listings WHERE id = 'yahoo:o2'")
+    assert (row["ok"], row["reason"]) == (0, "LLM: not Eva, though filed there")
+    got = sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "eva"}), [typo], 200.0, False)
+    assert got["new_cels"] and db.one("SELECT ok FROM listings WHERE id = 'yahoo:o1'")["ok"] == 1
+
+
+def test_a_new_franchise_reads_quietly_first(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("k.jpg", "f0f0f0f0f0f0f0f0"))
+    kiki = Raw(
+        "yahoo:k1", "Yahoo", "魔女の宅急便 キキ セル画", "https://example.invalid/k", yen=50000
+    )
+    got = sweep.ingest(
+        db, s, LLM("", "", "claude"), [kiki], 200.0, False, quiet_franchises={"kiki"}
+    )
+    assert not got["new_cels"]
+    assert db.one("SELECT baseline FROM cels WHERE franchise = 'kiki'")["baseline"] == 1
+
+
+def test_a_franchise_is_baselined_once_all_its_searches_read(env, monkeypatch):
+    s, db = env
+    db.put("baselined", True)
+    db.put("baselined_sources", list(sweep.ALL_SOURCES))
+    db.put("baselined_franchises", ["broly", "fma", "eva", "pokemon"])
+    monkeypatch.setattr(sweep, "backfill", lambda *a, **k: 0)
+    failing = {"mercari:魔女の宅急便 セル画"}
+
+    def collect(_s, db_, run_id, _check=None):
+        for name, _, _ in sweep.search_jobs(_s):
+            ok = name not in failing
+            db_.run(
+                "INSERT INTO run_sources (run_id, name, count, error) VALUES (?,?,?,?)",
+                run_id,
+                name,
+                0 if ok else None,
+                None if ok else "down",
+            )
+        return [], set(), set(), {}
+
+    monkeypatch.setattr(sweep, "collect", collect)
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert "kiki" not in db.get("baselined_franchises", [])  # one of its searches failed
+    assert "bebop" in db.get("baselined_franchises", [])
+    failing.clear()
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert set(db.get("baselined_franchises", [])) == set(sweep.FRANCHISES)

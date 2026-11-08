@@ -90,3 +90,55 @@ def test_cel_club_in_any_spelling_is_dropped():
     assert k("エヴァンゲリオン セル画 アスカ", "Evangelion Cell Club Asuka", yen=8000) is None
     t = "エヴァンゲリオン 公式複製セル画 GAINAX 限定100部 セル画 倶楽部"
     assert k(t, yen=30000) is None
+
+
+def test_new_franchises_on_real_titles():
+    # Buyee and Mercari titles seen 2026-11-08
+    assert k("15％値下げ　魔女の宅急便　キキ　おソノ　セル画と動画　スタ") == ("kiki", "cel")
+    assert k("16％値下げ　もののけ姫　アシタカ　セル画　スタジオジブリ　") == ("mononoke", "cel")
+    assert k("カウボーイビバップ セル画 エド エドワード・ウォン・ハウ・") == ("bebop", "cel")
+    assert k("ドラゴンボールZ　ベジータ　セル画　鳥山明　") == ("vegeta", "cel")
+    assert k("ドラゴンボールZ　孫悟空　セル画と動画　鳥山明　") == ("goku", "cel")
+    # a title naming two goes to the first: Broly, then Vegeta, then Goku
+    assert k("ドラゴンボール 孫悟空 ベジータ セル画") == ("vegeta", "cel")
+    assert k("劇場版 ドラゴンボールZ ブロリー 孫悟空 セル画") == ("broly", "cel")
+    assert franchise_of("", "Princess Mononoke Ashitaka cel") == "mononoke"
+    assert franchise_of("", "Mononoke Kusuriuri cel") is None  # the 2007 series
+    assert franchise_of("ビー・バップ・ハイスクール セル画") is None
+
+
+def test_the_other_goku_and_cell_the_villain():
+    assert k("劇場版 幻想魔伝 最遊記 Requiem 孫悟空 セル画", cat=False, yen=9000) is None
+    assert k("悟空の大冒険 セル画 手塚治虫", cat=False, yen=9000) is None
+    # In Dragon Ball titles bare セル is Cell; only セル画 says cel
+    assert k("ドラカプ　ベジータ　VS セル　完全体", cat=False, yen=9000, auction=False) is None
+    assert k(
+        "ドラゴンボールZ ベジータ 人造人間・セル編 セル画　超サイヤ人", cat=False, yen=9000
+    ) == ("vegeta", "cel")
+    assert k("ポケモン セル 2枚", cat=False, yen=9000) == (
+        "pokemon",
+        "cel",
+    )  # elsewhere it is a cel
+
+
+def test_new_franchise_prints_dropped():
+    for t in (
+        "魔女の宅急便　セル画　実寸レプリカ",
+        "【激レア】ドラゴンボールZ　孫悟空 界王拳　セル画アートシート　鳥山明",
+        "フュージョンワールド 破壊王子 SR ベジータ パラレル セル画　4枚",
+        "魔女の宅急便他 アニメセル画販売会 限定ハガキ 4枚 非売品物",
+        "【激レア】もののけ姫　ポスター　ジブリ　宮崎駿　B2サイズ　",
+    ):
+        assert k(t, yen=9000, auction=False) is None, t
+
+
+def test_category_hint_names_only_a_title_that_names_none():
+    typo = classify("エゥンゲリオン セル画", "", 60000, True, True, hint="eva")
+    assert typo == {"franchise": "eva", "kind": "cel", "hinted": True}
+    named = classify("魔女の宅急便 セル画", "", 60000, True, True, hint="eva")
+    assert named == {"franchise": "kiki", "kind": "cel", "hinted": False}
+    assert classify("エゥンゲリオン セル画", "", 60000, True, True) is None
+    # the category's junk is still junk (a Sailor Moon 同人 cel filed under Evangelion)
+    assert (
+        classify("美少女戦士セーラームーン 同人 セル画", "", 9000, True, True, hint="eva") is None
+    )

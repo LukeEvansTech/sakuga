@@ -8,8 +8,8 @@ web
 
 ## Users
 
-One collector (Luke) of Japanese anime production cels: Dragon Ball's Broly, Fullmetal Alchemist,
-Evangelion and Pokémon. The main moment is on a phone: the 08:00 Pushover digest arrives; one tap
+One collector (Luke) of Japanese anime production cels: Dragon Ball's Broly, Vegeta and Goku,
+Fullmetal Alchemist, Evangelion, Pokémon, Kiki's Delivery Service, Princess Mononoke and Cowboy Bebop. The main moment is on a phone: the 08:00 Pushover digest arrives; one tap
 opens Today, a flick through the day's new cels, and one or two get opened. Longer browsing of everything for sale is
 occasional.
 

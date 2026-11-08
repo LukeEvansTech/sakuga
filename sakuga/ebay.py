@@ -3,7 +3,7 @@
 Searched on the UK marketplace, so every price comes back in pounds (converted for sellers
 abroad). eBay's search for a franchise and "cel" spreads over many categories; the cels sit in
 Animation Art (1529) and Other Animation Merchandise (69528), and a search takes one category,
-so each search runs in each of the two (20 searches a sweep).
+so each search runs in each of the two (40 searches a sweep).
 """
 
 from __future__ import annotations
@@ -15,16 +15,22 @@ import time
 import urllib.parse
 import urllib.request
 
+from .filters import FRANCHISES
 from .sources import MORE_PHOTOS, Raw, Results
 
 API = "https://api.ebay.com"
 CATEGORIES = ("1529", "69528")
-# Each franchise as "cel" and "cell"; FMA's drawings are wanted too, and their titles may not say cel.
-QUERIES = [
-    f"{name} {word}"
-    for name in ("broly", "fullmetal alchemist", "evangelion", "pokemon")
-    for word in ("cel", "cell")
-] + ["fullmetal alchemist genga", "fullmetal alchemist douga"]
+
+
+def queries(key: str) -> list[str]:
+    """A franchise's searches: as "cel" and "cell", and as genga and douga where drawings are wanted
+    (their titles may not say cel)."""
+    f = FRANCHISES[key]
+    words = ("cel", "cell", "genga", "douga") if f["genga"] else ("cel", "cell")
+    return [f"{f['ebay']} {w}" for w in words]
+
+
+QUERIES = [q for key in FRANCHISES for q in queries(key)]
 LIMIT = 200  # the most one page holds
 MAX_PAGES = 5  # every search here fitted one page on 2026-11-05; more than 1,000 is a partial read
 # Without this filter the Browse API returns Buy It Now listings only (checked 2026-11-05).
@@ -145,6 +151,11 @@ def read(client: Client, q: str, category: str) -> Results:
             return out
     out.complete = False
     return out
+
+
+def job_names(key: str) -> set[str]:
+    """The names of a franchise's eBay jobs, as jobs() names them."""
+    return {f"ebay:{q}:{cat}" for q in queries(key) for cat in CATEGORIES}
 
 
 def jobs(client: Client) -> list:

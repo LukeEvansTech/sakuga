@@ -13,9 +13,10 @@ import threading
 import time
 from pathlib import Path
 
-from . import catalog, ebay, filters, images, notify
+from . import catalog, ebay, filters, images, notify, sources
 from .config import Settings
 from .db import DB
+from .filters import FRANCHISES
 from .llm import LLM
 from .sources import UA, Raw, jobs, mercari_available, more_photos
 
@@ -37,6 +38,11 @@ def search_jobs(s: Settings) -> list:
     return jobs() + ebay.jobs(
         ebay.Client(s.ebay_client_id, s.ebay_client_secret, s.ebay_marketplace)
     )
+
+
+def franchise_jobs(key: str) -> set[str]:
+    """Every search of a franchise's own, browser and eBay, by job name."""
+    return sources.job_names(key) | ebay.job_names(key)
 
 
 def collect(
@@ -130,6 +136,8 @@ def _same_fn(db: DB, llm: LLM, img_dir: Path, listing_id: str, image: str):
 
 # The sources of the first release: a catalogue baselined before baselined_sources existed had read them.
 FIRST_SOURCES = ("Yahoo", "Mercari", "Mandarake", "Mandarake auction")
+# Likewise the franchises, before baselined_franchises existed.
+FIRST_FRANCHISES = ("broly", "fma", "eva", "pokemon")
 ALL_SOURCES = (*FIRST_SOURCES, "eBay")
 
 
@@ -153,7 +161,7 @@ def gather_photos(page, db: DB, raws: list[Raw]) -> None:
             if old["ok"] and not old["photos_done"]:
                 todo.append((old["photos_tried"] or "0", raw))
         elif filters.classify(
-            raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction, raw.lang == "en"
+            raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction, raw.lang == "en", raw.hint
         ):
             todo.append(("", raw))
     pages = 0
@@ -191,8 +199,12 @@ def ingest(
     rate: float | None,
     baseline: bool,
     quiet: frozenset[str] | set[str] = frozenset(),
+    quiet_franchises: frozenset[str] | set[str] = frozenset(),
 ) -> dict:
-    """Store and catalogue one sweep's listings. Returns counts and the new cel ids."""
+    """Store and catalogue one sweep's listings. Returns counts and the new cel ids.
+
+    quiet holds sources, and quiet_franchises franchises, still on their first read: their new cels
+    are baseline, never announced (a franchise added later brings years of listings at once)."""
     t = now()
     seen: set[str] = set()
     kept, new_cels = 0, []
@@ -256,7 +268,13 @@ def ingest(
 
         # Converted first, so the minimum price applies to Mercari's pound-only prices too.
         c = filters.classify(
-            raw.title, raw.extra, yen, raw.cel_category, raw.auction, english=raw.lang == "en"
+            raw.title,
+            raw.extra,
+            yen,
+            raw.cel_category,
+            raw.auction,
+            english=raw.lang == "en",
+            hint=raw.hint,
         )
         if not c:
             continue
@@ -270,7 +288,9 @@ def ingest(
             # Never the further photos alone: a douga beside a cel would read as the listing.
             [s.img_dir / f for f in [image, *more]] if image else [],
         )
-        k = catalog.keep(c["franchise"], c["kind"], verdict)
+        if verdict is None and c["hinted"]:
+            continue  # only the LLM can confirm a category's franchise: stored once it answers
+        k = catalog.keep(c["franchise"], c["kind"], verdict, c["hinted"])
         if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
             # No answer this time, but the same photo was rejected before: a relist of that artwork.
             k = catalog.Keep(False, twin["kind"], False, f"same photo as rejected {twin['id']}")
@@ -282,6 +302,7 @@ def ingest(
                 ph, c["franchise"], cands, _same_fn(db, llm, s.img_dir, raw.id, image), raw.title
             )
             v = verdict or {}
+            still = baseline or raw.source in quiet or c["franchise"] in quiet_franchises
             if cel_id is None:
                 cel_id = db.run(
                     "INSERT INTO cels (franchise, kind, title_en, title_jp, notes, image, phash, gainax,"
@@ -294,11 +315,11 @@ def ingest(
                     image,
                     ph,
                     int(k.gainax),
-                    int(baseline or raw.source in quiet),
+                    int(still),
                     t,
                     t,
                 )
-                if not (baseline or raw.source in quiet):
+                if not still:
                     new_cels.append(cel_id)
             else:
                 # An accepted listing joining a cel hidden on a second look brings it back, as it now reads.
@@ -643,7 +664,12 @@ def run(
         if known is None:
             known = list(FIRST_SOURCES) if not baseline else []
         quiet = families - set(known)
-        got = ingest(db, s, model, raws, rate, baseline, quiet)
+        # Likewise a franchise added later, until each of its own searches has read once.
+        known_f = db.get("baselined_franchises", None)
+        if known_f is None:
+            known_f = list(FIRST_FRANCHISES) if not baseline else []
+        quiet_f = set(FRANCHISES) - set(known_f)
+        got = ingest(db, s, model, raws, rate, baseline, quiet, quiet_f)
         backfill(db, model, s)
         reconcile_hidden(db)
         # A source not searched at all this sweep (eBay without keys) proves nothing about its listings.
@@ -663,6 +689,10 @@ def run(
         done = {family for name, family, _ in search_jobs(s) if name in read_ok} & quiet
         if done or db.get("baselined_sources", None) is None:
             db.put("baselined_sources", sorted(set(known) | done))
+        names = {name for name, _, _ in search_jobs(s)}
+        done_f = {k for k in quiet_f if (franchise_jobs(k) & names) <= read_ok}
+        if done_f or db.get("baselined_franchises", None) is None:
+            db.put("baselined_franchises", sorted(set(known_f) | done_f))
         db.run(
             "UPDATE runs SET finished=?, status=?, listings=?, kept=?, new_cels=?, llm_calls=?, llm_cost=?,"
             " alerts=? WHERE id=?",

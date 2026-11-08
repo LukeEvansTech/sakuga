@@ -22,9 +22,14 @@ digest (08:00)       ─▶ one alert for the cels first seen since the last dig
 - **Cel and listing.** A listing is one sighting on one site; a cel is the artwork. A relist, or the
   same cel on another site, joins the existing cel, so it is announced once.
 - **Instant alerts** only for GAINAX's numbered limited reproduction cels; everything else waits for
-  the digest. The first sweep is a baseline and is never announced.
-- **Franchises** (Broly, Fullmetal Alchemist, Evangelion, Pokémon) and their searches live in
-  `sakuga/filters.py`.
+  the digest. The first sweep is a baseline and is never announced, and so is a franchise's first
+  full read after it is added.
+- **Franchises** (Broly, Vegeta and Goku from Dragon Ball, Fullmetal Alchemist, Evangelion, Pokémon,
+  Kiki's Delivery Service, Princess Mononoke, Cowboy Bebop) and their searches live in
+  `sakuga/filters.py`. On Yahoo each is a keyword search inside セル画, and where Yahoo has the
+  franchise's own セル画 sub-category (Evangelion, Kiki, Mononoke, Bebop) that is read whole too, which
+  finds titles the keywords miss (a typo, no name). Such a listing is catalogued only when the LLM names
+  the same franchise from the photo, as the categories hold misfiled listings.
 
 ## Run it
 

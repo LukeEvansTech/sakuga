@@ -28,15 +28,21 @@ class Keep:
     reason: str = ""
 
 
-def keep(franchise: str, regex_kind: str, verdict: dict | None) -> Keep:
+def keep(franchise: str, regex_kind: str, verdict: dict | None, hinted: bool = False) -> Keep:
     """Combine the regex first pass (which already passed) with the LLM's reading of the photo.
 
     The regex keeps the franchise (it reads the Japanese title, which is reliable); the LLM may
     only narrow: a print or Cel Club, a non-GAINAX reproduction, or drawings where the franchise wants cels only.
+    A hinted franchise came from the Yahoo category alone (the title names none), and Yahoo's categories
+    hold misfiled listings: it stands only when the LLM, having seen the photo, names the same one.
+    The caller keeps a hinted listing with no verdict out of the catalogue until it gets one.
     """
     gainax = regex_kind == "gainax-limited"
     if not verdict:
         return Keep(True, "cel" if gainax else regex_kind, gainax)
+    if hinted and verdict.get("franchise") != franchise:
+        label = FRANCHISES[franchise]["label"]
+        return Keep(False, verdict.get("kind", ""), False, f"LLM: not {label}, though filed there")
     kind = verdict.get("kind", "")
     if verdict.get("cel_club") is True:
         return Keep(False, "print", False, "LLM: Cel Club")

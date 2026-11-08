@@ -70,6 +70,7 @@ class Raw:
     cel_category: bool = False
     lang: str = "ja"  # "en" where the title is English (eBay)
     photos: list[str] | None = None  # the listing's further photos; None until gathered
+    hint: str = ""  # the franchise of the Yahoo category it was found in
     meta: dict = field(default_factory=dict)
 
 
@@ -98,15 +99,21 @@ def _scroll_to_bottom(page, rounds: int = 60) -> None:
     page.wait_for_timeout(800)
 
 
-def buyee(page, q: str) -> list[Raw]:
-    url = (
-        f"https://buyee.jp/item/search/query/{urllib.parse.quote(q)}/category/2084005356"
-        "?sort=end&order=d"
-    )
-    _load(page, url, "li.itemCard")
+CEL_CATEGORY = "2084005356"  # Yahoo's セル画
+BUYEE_PAGE = 100  # cards on one Buyee results page
+BUYEE_PAGES = 5  # pages read per search; more is a partial read
+NOT_FOUND = ".bidNotfound_middle"  # Buyee's no-results panel (checked 2026-11-08)
+
+
+def _buyee_page(page, url: str) -> list[dict]:
+    """One results page's cards. Buyee's own "商品が見つかりませんでした" panel is an empty search
+    (Bebop's category holds four, and may hold none); a page with neither is a failed load."""
+    _load(page, url, f"li.itemCard, {NOT_FOUND}")
     if "Buyee" not in page.title():
         raise RuntimeError(f"not a Buyee page: {page.title()[:80]!r}")
-    rows = page.evaluate("""() => [...document.querySelectorAll('li.itemCard')].map(li => {
+    if not page.query_selector("li.itemCard"):
+        return []
+    return page.evaluate("""() => [...document.querySelectorAll('li.itemCard')].map(li => {
       const a = li.querySelector('.itemCard__itemName a'); const img = li.querySelector('img');
       return {href: a && a.href, jp: img ? (img.getAttribute('alt') || '') : '', en: a ? a.innerText.trim() : '',
               img: img ? (img.getAttribute('data-src') || img.src || '') : '',
@@ -114,6 +121,10 @@ def buyee(page, q: str) -> list[Raw]:
               fx: (li.querySelector('.g-priceFx')||{}).textContent || '',
               info: [...li.querySelectorAll('.itemCard__infoItem')]
                 .map(x => x.textContent.trim().replace(/\\s+/g,' ')).join(' · ')}})""")
+
+
+def buyee_rows(rows: list[dict], hint: str = "") -> list[Raw]:
+    """Buyee result cards as listings; hint is the franchise a category search implies."""
     out = []
     for r in rows:
         if not r["href"]:
@@ -133,10 +144,28 @@ def buyee(page, q: str) -> list[Raw]:
                 info=info.strip(" ·"),
                 auction=True,
                 cel_category=True,
+                hint=hint,
             )
         )
-    if not out:
-        raise RuntimeError("Buyee cards held no readable item links")
+    return out
+
+
+def buyee(page, q: str = "", category: str = CEL_CATEGORY, hint: str = "") -> Results:
+    """A keyword search inside セル画, or (no q) one franchise's sub-category, every page of it.
+
+    Searches past one page (悟空 holds 137) are read page by page; past BUYEE_PAGES the read is partial.
+    """
+    path = f"query/{urllib.parse.quote(q)}/category/{category}" if q else f"category/{category}"
+    out = Results()
+    for n in range(1, BUYEE_PAGES + 1):
+        rows = _buyee_page(page, f"https://buyee.jp/item/search/{path}?sort=end&order=d&page={n}")
+        got = buyee_rows(rows, hint)
+        if rows and not got:
+            raise RuntimeError("Buyee cards held no readable item links")
+        out += got
+        if len(rows) < BUYEE_PAGE:
+            return out
+    out.complete = False
     return out
 
 
@@ -298,12 +327,24 @@ def more_photos(page, raw: Raw) -> list[str] | None:
 Job = tuple[str, str, Callable]  # (name, family, fn(page) -> list[Raw])
 
 
+def job_names(key: str) -> set[str]:
+    """The names of a franchise's own browser searches, as jobs() names them."""
+    f = FRANCHISES[key]
+    names = {f"buyee:{q}" for q in f["buyee"]} | {f"mercari:{q}" for q in f["mercari"]}
+    return names | ({f"buyee-cat:{key}"} if f.get("category") else set())
+
+
 def jobs() -> list[Job]:
     """Every search one sweep runs. The family groups a site's searches for deactivation."""
     out: list[Job] = []
-    for f in FRANCHISES.values():
+    for key, f in FRANCHISES.items():
         for q in f["buyee"]:
             out.append((f"buyee:{q}", "Yahoo", lambda p, q=q: buyee(p, q)))
+        if f.get("category"):  # found here, a title that names no franchise is taken as this one
+            cat = f["category"]
+            out.append(
+                (f"buyee-cat:{key}", "Yahoo", lambda p, c=cat, k=key: buyee(p, category=c, hint=k))
+            )
     for f in FRANCHISES.values():
         for q in f["mercari"]:
             out.append((f"mercari:{q}", "Mercari", lambda p, q=q: mercari(p, q)))

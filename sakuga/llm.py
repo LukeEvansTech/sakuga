@@ -16,6 +16,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from .filters import FRANCHISES
+
 log = logging.getLogger(__name__)
 
 CLASSIFY = """You catalogue Japanese anime production art for a collector. Read this marketplace listing
@@ -24,7 +26,7 @@ CLASSIFY = """You catalogue Japanese anime production art for a collector. Read 
 {"kind": "cel" | "genga" | "douga" | "reproduction" | "print" | "not_art",
  "gainax_limited": true|false,
  "cel_club": true|false,
- "franchise": "broly" | "fma" | "eva" | "pokemon" | "other",
+ "franchise": {franchises} | "other",
  "characters": ["English names"],
  "episode_cut": "e.g. ep 24 C-298, or empty",
  "background": true|false,
@@ -41,12 +43,18 @@ Definitions:
   セル画クラブ, CEL CLUB, CELLU CLUB), in any spelling, such as a seal, stamp or certificate in a later photo.
   A Cel Club cel is never gainax_limited.
 - not_art: figures, books, goods, anything else.
-- broly is Dragon Ball's Broly (ブロリー) only; other Dragon Ball characters are "other".
+- franchise: {franchise_names}.
+- broly, vegeta and goku are Dragon Ball's Broly (ブロリー), Vegeta (ベジータ) and Son Goku (孫悟空) only;
+  a cel showing more than one is the first of broly, vegeta, goku. Other Dragon Ball characters are "other".
 Judge from the photos as well as the words: a glossy printed card or a book page is not a cel.
 
 Title: {title}
 Translation: {extra}
 Price: {price}"""
+
+CLASSIFY = CLASSIFY.replace("{franchises}", " | ".join(f'"{k}"' for k in FRANCHISES)).replace(
+    "{franchise_names}", "; ".join(f"{k} is {f['name']}" for k, f in FRANCHISES.items())
+)
 
 SAME = """These are the main photos of two Japanese marketplace listings of anime production cels.
 Are they the same physical cel (the same artwork, perhaps photographed again, cropped or with a
