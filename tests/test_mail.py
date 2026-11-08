@@ -182,3 +182,11 @@ def test_web_copy(mailed):  # pylint: disable=redefined-outer-name
     r = c.get("/digest/last")
     assert r.status_code == 200 and "Rei Ayanami 2" in r.text and "cid:" not in r.text
     assert "last one" in c.get("/log").text
+
+
+def test_cut_off_marking_is_reconciled(mailed):  # pylint: disable=redefined-outer-name
+    s, db = mailed
+    db.run("UPDATE cels SET mailed = ? WHERE id = 2", T)  # emailed, then the pod restarted
+    assert sweep.digest(db, s) == "sent"  # the email carries cel 3 only
+    assert sweep.pending(db) == []
+    assert db.one("SELECT cels FROM digests")["cels"] == 2

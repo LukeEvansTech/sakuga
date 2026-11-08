@@ -759,15 +759,21 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
     )
     # "sent" if either channel delivered; "off" (both off) keeps them pending
     r = "sent" if "sent" in (push, email) else push if push != "off" else email
-    if r == "sent":
+    # Only what a channel delivered: Pushover sent `cels`, the email its own list. A cel emailed
+    # earlier whose marking was cut off (a restart) is caught here too.
+    done = {c["id"] for c in cels} if push == "sent" else set(mailed)
+    done |= {
+        c["id"]
+        for c in cels
+        if c["id"] in mailed or (c["mailed"] and c["mailed"] != "before email")
+    }
+    if done:
         did = db.run(
             "INSERT INTO digests (created, cels, result) VALUES (?,?,?)",
             now(),
-            n,
+            len(done),
             f"push {push}, email {email}",
         )
-        # only what a channel delivered: Pushover sent `cels`, the email its own list
-        done = set(mailed) | ({c["id"] for c in cels} if push == "sent" else set())
         with db.tx() as con:
             con.executemany(
                 "UPDATE cels SET digest_id = ? WHERE id = ? AND digest_id IS NULL",
