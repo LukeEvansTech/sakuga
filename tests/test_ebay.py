@@ -60,7 +60,8 @@ def test_a_cut_off_page_is_partial():
 def test_ebay_runs_only_with_keys():
     assert all(family != "eBay" for _, family, _ in sources.jobs())
     names = [n for n, family, _ in ebay.jobs(ebay.Client("id", "secret"))]
-    assert len(names) == 20 and "ebay:fullmetal alchemist genga:1529" in names
+    assert len(names) == 40 and "ebay:fullmetal alchemist genga:1529" in names
+    assert "ebay:cowboy bebop cel:69528" in names and "ebay:goku genga:1529" not in names
 
 
 def k(title, yen=None, auction=False):

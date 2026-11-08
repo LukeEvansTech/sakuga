@@ -108,3 +108,11 @@ def test_scheduler_waits_across_the_autumn_clock_change():
     now = dt.datetime(2026, 10, 25, 1, 40, tzinfo=london)  # first 01:40, still BST
     at = next_time("*/30 * * * *", "Europe/London", now)
     assert at.timestamp() > now.timestamp()
+
+
+def test_hinted_franchise_stands_only_when_the_llm_names_it():
+    v = {"kind": "cel", "franchise": "other"}
+    assert keep("eva", "cel", v).ok  # named by the title: the LLM may not take it away
+    out = keep("eva", "cel", v, hinted=True)
+    assert (out.ok, out.reason) == (False, "LLM: not Eva, though filed there")
+    assert keep("eva", "cel", {"kind": "cel", "franchise": "eva"}, hinted=True).ok

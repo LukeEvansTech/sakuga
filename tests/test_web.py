@@ -544,3 +544,115 @@ def test_further_photos_wait_for_the_main_one(env, monkeypatch):
     sweep.ingest(db, s, llm, [raw], 200.0, False)  # the main photo arrives
     sweep.backfill(db, llm, s)
     assert ["main.jpg", "seal.jpg"] in llm.calls
+
+
+def test_hinted_listing_waits_for_the_llm_and_misfiled_ones_drop(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("h.jpg", "0f0f0f0f0f0f0f0f"))
+    typo = Raw("yahoo:o1", "Yahoo", "エゥンゲリオン セル画", "https://example.invalid/o", yen=60000)
+    typo = dataclasses.replace(typo, cel_category=True, auction=True, hint="eva")
+    sweep.ingest(db, s, _Says(None), [typo], 200.0, False)
+    assert db.one("SELECT id FROM listings WHERE id = 'yahoo:o1'") is None  # asked again next sweep
+    misfiled = dataclasses.replace(typo, id="yahoo:o2", title="王立宇宙軍 オネアミスの翼 セル画")
+    sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "other"}), [misfiled], 200.0, False)
+    row = db.one("SELECT ok, reason FROM listings WHERE id = 'yahoo:o2'")
+    assert (row["ok"], row["reason"]) == (0, "LLM: not Eva, though filed there")
+    got = sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "eva"}), [typo], 200.0, False)
+    assert got["new_cels"] and db.one("SELECT ok FROM listings WHERE id = 'yahoo:o1'")["ok"] == 1
+
+
+def test_a_new_franchise_reads_quietly_first(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("k.jpg", "f0f0f0f0f0f0f0f0"))
+    kiki = Raw(
+        "yahoo:k1", "Yahoo", "魔女の宅急便 キキ セル画", "https://example.invalid/k", yen=50000
+    )
+    got = sweep.ingest(
+        db, s, LLM("", "", "claude"), [kiki], 200.0, False, quiet_franchises={"kiki"}
+    )
+    assert not got["new_cels"]
+    assert db.one("SELECT baseline FROM cels WHERE franchise = 'kiki'")["baseline"] == 1
+
+
+def test_a_franchise_is_baselined_once_all_its_searches_read(env, monkeypatch):
+    s, db = env
+    db.put("baselined", True)
+    db.put("baselined_sources", list(sweep.ALL_SOURCES))
+    db.put("baselined_franchises", ["broly", "fma", "eva", "pokemon"])
+    monkeypatch.setattr(sweep, "backfill", lambda *a, **k: 0)
+    failing = {"mercari:魔女の宅急便 セル画"}
+    capped = {"buyee:悟空", "mandarake-shop"}  # Mandarake at its cap still counts as read
+
+    def collect(_s, db_, run_id, _check=None):
+        for name, _, _ in sweep.search_jobs(_s):
+            ok = name not in failing
+            db_.run(
+                "INSERT INTO run_sources (run_id, name, count, error, partial) VALUES (?,?,?,?,?)",
+                run_id,
+                name,
+                0 if ok else None,
+                None if ok else "down",
+                int(name in capped),
+            )
+        return [], set(), set(), {}
+
+    monkeypatch.setattr(sweep, "collect", collect)
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert "kiki" not in db.get("baselined_franchises", [])  # one of its searches failed
+    assert "bebop" in db.get("baselined_franchises", [])
+    assert "goku" not in db.get("baselined_franchises", [])  # stopped at its page cap
+    failing.clear()
+    failing.add("buyee:魔女の宅急便")  # Kiki's Mercari read last sweep; its Yahoo search fails now
+    capped.clear()
+    sweep.run(db, s, notify_on=False, llm=LLM("", "", "claude"))
+    assert set(db.get("baselined_franchises", [])) == set(sweep.FRANCHISES)
+
+
+def test_hinted_listing_needs_a_photo_and_keeps_its_franchise_quiet(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("", ""))
+    typo = Raw("yahoo:o3", "Yahoo", "エゥンゲリオン セル画", "https://example.invalid/o", yen=60000)
+    typo = dataclasses.replace(typo, cel_category=True, auction=True, hint="kiki")
+    say = _Says({"kind": "cel", "franchise": "kiki"})
+    sweep.ingest(db, s, say, [typo], 200.0, False, quiet_franchises={"kiki"})
+    assert db.one("SELECT id FROM listings WHERE id = 'yahoo:o3'") is None  # no photo: no verdict
+    assert db.get(sweep.QUIET_HELD, []) == [["yahoo:o3", ""]]
+    # the photo arrives after Kiki finished its first read: the cel is still not news
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("o.jpg", "0f0f0f0f0f0f0f0f"))
+    got = sweep.ingest(db, s, say, [typo], 200.0, False)
+    assert not got["new_cels"] and db.get(sweep.QUIET_HELD, None) == []
+    assert db.one("SELECT baseline FROM cels WHERE franchise = 'kiki'")["baseline"] == 1
+
+
+def test_dragon_ball_relist_under_another_character_joins_the_cel(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("d.jpg", "00ff00ff00ff00ff"))
+    both = Raw(
+        "yahoo:d1", "Yahoo", "ドラゴンボール 孫悟空 ベジータ セル画", "https://example.invalid/d"
+    )
+    one = Raw("mercari:d2", "Mercari", "ドラゴンボール 孫悟空 セル画", "https://example.invalid/e")
+    llm = LLM("", "", "claude")
+    first = sweep.ingest(db, s, llm, [dataclasses.replace(both, yen=90000)], 200.0, False)
+    again = sweep.ingest(db, s, llm, [dataclasses.replace(one, yen=90000)], 200.0, False)
+    assert first["new_cels"] and not again["new_cels"]  # filed as Vegeta, then as Goku: one cel
+
+
+def test_backfill_keeps_the_category_rule(env):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg', hinted = 1, verdict = '' WHERE id = 'yahoo:a2'")
+    db.run("UPDATE listings SET first_seen = '2099-01-01 00:00:00' WHERE id = 'yahoo:a2'")
+    sweep.backfill(db, _Says({"kind": "cel", "franchise": "other"}), s, limit=1)
+    row = db.one("SELECT ok, reason FROM listings WHERE id = 'yahoo:a2'")
+    assert (row["ok"], row["reason"]) == (0, "LLM: not Eva, though filed there")
+
+
+def test_a_held_photo_keeps_its_relist_quiet(env, monkeypatch):
+    s, db = env
+    monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("o.jpg", "0f0f0f0f0f0f0f0f"))
+    typo = Raw("yahoo:o4", "Yahoo", "エゥンゲリオン セル画", "https://example.invalid/o", yen=60000)
+    typo = dataclasses.replace(typo, cel_category=True, auction=True, hint="kiki")
+    sweep.ingest(db, s, _Says(None), [typo], 200.0, False, quiet_franchises={"kiki"})
+    relist = dataclasses.replace(typo, id="yahoo:o5")
+    got = sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "kiki"}), [relist], 200.0, False)
+    assert not got["new_cels"]
+    assert db.get(sweep.QUIET_HELD, None) == [["yahoo:o4", "0f0f0f0f0f0f0f0f"]]

@@ -13,9 +13,10 @@ import threading
 import time
 from pathlib import Path
 
-from . import catalog, ebay, filters, images, mail, notify
+from . import catalog, ebay, filters, images, mail, notify, sources
 from .config import Settings
 from .db import DB
+from .filters import FRANCHISES
 from .llm import LLM
 from .sources import UA, Raw, jobs, mercari_available, more_photos
 
@@ -37,6 +38,11 @@ def search_jobs(s: Settings) -> list:
     return jobs() + ebay.jobs(
         ebay.Client(s.ebay_client_id, s.ebay_client_secret, s.ebay_marketplace)
     )
+
+
+def franchise_jobs(key: str) -> set[str]:
+    """A franchise's own searches, browser and eBay, by job name."""
+    return sources.job_names(key) | ebay.job_names(key)
 
 
 def collect(
@@ -77,12 +83,14 @@ def collect(
                     if not getattr(got, "complete", True):
                         partial.add(family)
                 db.run(
-                    "INSERT OR REPLACE INTO run_sources (run_id, name, count, error, seconds) VALUES (?,?,?,?,?)",
+                    "INSERT OR REPLACE INTO run_sources (run_id, name, count, error, seconds, partial)"
+                    " VALUES (?,?,?,?,?,?)",
                     run_id,
                     name,
                     None if got is None else len(got),
                     err or None,
                     round(time.monotonic() - started, 1),
+                    int(got is not None and not getattr(got, "complete", True)),
                 )
             gather_photos(page, db, raws)
             for url in check or []:
@@ -130,6 +138,12 @@ def _same_fn(db: DB, llm: LLM, img_dir: Path, listing_id: str, image: str):
 
 # The sources of the first release: a catalogue baselined before baselined_sources existed had read them.
 FIRST_SOURCES = ("Yahoo", "Mercari", "Mandarake", "Mandarake auction")
+QUIET_HELD = "quiet_held"  # kv: hinted listings first seen on a quiet read, not yet stored
+MAX_HELD = 2000
+QUIET_READS = "quiet_reads"  # kv: searches read whole since a franchise was added
+MANDARAKE_JOBS = {"mandarake-shop", "mandarake-auction"}
+# Likewise the franchises, before baselined_franchises existed.
+FIRST_FRANCHISES = ("broly", "fma", "eva", "pokemon")
 ALL_SOURCES = (*FIRST_SOURCES, "eBay")
 
 
@@ -152,9 +166,19 @@ def gather_photos(page, db: DB, raws: list[Raw]) -> None:
         if old:
             if old["ok"] and not old["photos_done"]:
                 todo.append((old["photos_tried"] or "0", raw))
-        elif filters.classify(
-            raw.title, raw.extra, raw.yen, raw.cel_category, raw.auction, raw.lang == "en"
-        ):
+        elif (
+            c := filters.classify(
+                raw.title,
+                raw.extra,
+                raw.yen,
+                raw.cel_category,
+                raw.auction,
+                raw.lang == "en",
+                raw.hint,
+            )
+        ) and not c["hinted"]:
+            # A hinted one waits for its verdict on the main photo; once stored it joins the queue,
+            # so an unanswered one never holds the page budget sweep after sweep.
             todo.append(("", raw))
     pages = 0
     for _, raw in sorted(todo, key=lambda x: x[0]):
@@ -191,11 +215,19 @@ def ingest(
     rate: float | None,
     baseline: bool,
     quiet: frozenset[str] | set[str] = frozenset(),
+    quiet_franchises: frozenset[str] | set[str] = frozenset(),
 ) -> dict:
-    """Store and catalogue one sweep's listings. Returns counts and the new cel ids."""
+    """Store and catalogue one sweep's listings. Returns counts and the new cel ids.
+
+    quiet holds sources, and quiet_franchises franchises, still on their first read: their new cels
+    are baseline, never announced (a franchise added later brings years of listings at once)."""
     t = now()
     seen: set[str] = set()
     kept, new_cels = 0, []
+    deferred: dict[str, str] = {}  # listing id -> photo hash
+    # Deferred on an earlier quiet read, by id and by photo (a relist under a new id).
+    held: dict[str, str] = dict(db.get(QUIET_HELD, []))
+    held_ph = [h for h in held.values() if h]
     for raw in raws:
         if raw.id in seen:
             continue
@@ -256,7 +288,13 @@ def ingest(
 
         # Converted first, so the minimum price applies to Mercari's pound-only prices too.
         c = filters.classify(
-            raw.title, raw.extra, yen, raw.cel_category, raw.auction, english=raw.lang == "en"
+            raw.title,
+            raw.extra,
+            yen,
+            raw.cel_category,
+            raw.auction,
+            english=raw.lang == "en",
+            hint=raw.hint,
         )
         if not c:
             continue
@@ -270,7 +308,21 @@ def ingest(
             # Never the further photos alone: a douga beside a cel would read as the listing.
             [s.img_dir / f for f in [image, *more]] if image else [],
         )
-        k = catalog.keep(c["franchise"], c["kind"], verdict)
+        if c["hinted"] and (verdict is None or not image):
+            # Only the LLM, with the photo, can confirm a category's franchise: stored once it has.
+            # Seen on a quiet read, it stays quiet when it is stored later.
+            if (
+                baseline
+                or raw.source in quiet
+                or c["franchise"] in quiet_franchises
+                or raw.id in held
+                or _held_photo(held_ph, ph)
+            ):
+                deferred[raw.id] = ph or held.get(raw.id, "")  # a failed retry keeps the photo
+                if ph:
+                    held_ph.append(ph)  # a later listing this sweep may show it too
+            continue
+        k = catalog.keep(c["franchise"], c["kind"], verdict, c["hinted"])
         if verdict is None and (twin := rejected_twin(db, c["franchise"], ph)):
             # No answer this time, but the same photo was rejected before: a relist of that artwork.
             k = catalog.Keep(False, twin["kind"], False, f"same photo as rejected {twin['id']}")
@@ -282,6 +334,13 @@ def ingest(
                 ph, c["franchise"], cands, _same_fn(db, llm, s.img_dir, raw.id, image), raw.title
             )
             v = verdict or {}
+            still = (
+                baseline
+                or raw.source in quiet
+                or c["franchise"] in quiet_franchises
+                or raw.id in held
+                or _held_photo(held_ph, ph)
+            )
             if cel_id is None:
                 cel_id = db.run(
                     "INSERT INTO cels (franchise, kind, title_en, title_jp, notes, image, phash, gainax,"
@@ -294,11 +353,11 @@ def ingest(
                     image,
                     ph,
                     int(k.gainax),
-                    int(baseline or raw.source in quiet),
+                    int(still),
                     t,
                     t,
                 )
-                if not (baseline or raw.source in quiet):
+                if not still:
                     new_cels.append(cel_id)
             else:
                 # An accepted listing joining a cel hidden on a second look brings it back, as it now reads.
@@ -321,7 +380,7 @@ def ingest(
         db.run(
             "INSERT INTO listings (id, source, cel_id, title, extra, url, img_url, image, phash, yen, gbp,"
             " info, auction, franchise, kind, verdict, ok, reason, first_seen, last_seen, photos,"
-            " photos_done, recheck) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " photos_done, recheck, hinted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             raw.id,
             raw.source,
             cel_id,
@@ -347,6 +406,7 @@ def ingest(
             int(
                 bool(more) and not image
             ),  # withheld for want of the main photo: asked once it comes
+            int(c["hinted"]),
         )
         if yen:
             db.run(
@@ -355,17 +415,26 @@ def ingest(
                 t,
                 yen,
             )
+        # Held until stored (seen and not deferred again), then forgotten.
+    stored = seen - set(deferred)
+    still_held = {i: h for i, h in held.items() if i not in stored} | deferred
+    db.put(QUIET_HELD, sorted(still_held.items())[-MAX_HELD:])
     return {"seen": seen, "kept": kept, "new_cels": new_cels}
+
+
+def _held_photo(held: list[str], ph: str) -> bool:
+    return bool(ph) and any(images.distance(ph, h) <= catalog.NEAR for h in held)
 
 
 def rejected_twin(db: DB, franchise: str, ph: str):
     """A listing the LLM rejected whose photo is this one (a relist), or None."""
     if not ph:
         return None
+    keys = filters.scope(franchise)
     rows = db.all(
-        "SELECT id, kind, phash FROM listings WHERE franchise = ? AND ok = 0 AND verdict != ''"
-        " AND phash != ''",
-        franchise,
+        f"SELECT id, kind, phash FROM listings WHERE franchise IN ({','.join('?' * len(keys))})"
+        " AND ok = 0 AND verdict != '' AND phash != ''",
+        *keys,
     )
     return next((r for r in rows if images.distance(ph, r["phash"]) <= catalog.NEAR), None)
 
@@ -393,7 +462,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
     catalogue (its cel is hidden if nothing else holds it), and kind and GAINAX follow the LLM. Returns the number answered.
     """
     rows = db.all(
-        "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id,"
+        "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id, l.hinted,"
         " c.gainax FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
         " WHERE l.ok = 1 AND (l.verdict = '' OR l.recheck = 1)"
         " AND l.image != ''"  # sold ones too: they hold a cel visible
@@ -414,7 +483,9 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
         if not verdict:
             continue
         answered += 1
-        k = catalog.keep(r["franchise"], "gainax-limited" if r["gainax"] else "cel", verdict)
+        k = catalog.keep(
+            r["franchise"], "gainax-limited" if r["gainax"] else "cel", verdict, bool(r["hinted"])
+        )
         # One transaction per listing: an interruption leaves the listing and its cel consistent.
         with NOTIFY_LOCK, db.tx() as con:
             if not k.ok:
@@ -452,13 +523,16 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
 def candidates(db: DB, franchise: str, exclude: int = 0) -> list[catalog.Candidate]:
     """Every known photo of every cel in the franchise: each cel's own, and each of its listings'
     (a relist may reuse any photo the cel was ever shown with, under any title)."""
+    keys = filters.scope(franchise)  # Dragon Ball's three share their cels
+    marks = ",".join("?" * len(keys))
     rows = db.all(
-        "SELECT id AS cel, phash, title_jp AS title FROM cels WHERE franchise = ? AND id != ?"
-        " UNION ALL SELECT cel_id, phash, title FROM listings"
-        " WHERE franchise = ? AND ok = 1 AND cel_id IS NOT NULL AND cel_id != ? AND phash != ''",
-        franchise,
+        f"SELECT id AS cel, phash, title_jp AS title FROM cels WHERE franchise IN ({marks})"
+        " AND id != ? UNION ALL SELECT cel_id, phash, title FROM listings"
+        f" WHERE franchise IN ({marks}) AND ok = 1 AND cel_id IS NOT NULL AND cel_id != ?"
+        " AND phash != ''",
+        *keys,
         exclude,
-        franchise,
+        *keys,
         exclude,
     )
     return [catalog.Candidate(r["cel"], r["phash"], franchise, r["title"]) for r in rows]
@@ -644,7 +718,12 @@ def run(
         if known is None:
             known = list(FIRST_SOURCES) if not baseline else []
         quiet = families - set(known)
-        got = ingest(db, s, model, raws, rate, baseline, quiet)
+        # Likewise a franchise added later, until each of its own searches has read once.
+        known_f = db.get("baselined_franchises", None)
+        if known_f is None:
+            known_f = list(FIRST_FRANCHISES) if not baseline else []
+        quiet_f = set(FRANCHISES) - set(known_f)
+        got = ingest(db, s, model, raws, rate, baseline, quiet, quiet_f)
         backfill(db, model, s)
         reconcile_hidden(db)
         # A source not searched at all this sweep (eBay without keys) proves nothing about its listings.
@@ -664,6 +743,23 @@ def run(
         done = {family for name, family, _ in search_jobs(s) if name in read_ok} & quiet
         if done or db.get("baselined_sources", None) is None:
             db.put("baselined_sources", sorted(set(known) | done))
+        # Only whole reads count: a search stopped at its page cap left listings unseen.
+        whole = {
+            r["name"]
+            for r in db.all(
+                "SELECT name FROM run_sources WHERE run_id = ? AND count IS NOT NULL AND partial = 0",
+                run_id,
+            )
+        }
+        names = {name for name, _, _ in search_jobs(s)}
+        # Mandarake's two lists hold every franchise's cels and often stop at their cap, so for them
+        # a read is enough: requiring a whole one would keep a new franchise quiet for good.
+        # Reads add up across sweeps while any franchise is quiet: one failing search a sweep is enough.
+        reads = set(db.get(QUIET_READS, [])) | whole | (MANDARAKE_JOBS & read_ok)
+        done_f = {k for k in quiet_f if ((franchise_jobs(k) | MANDARAKE_JOBS) & names) <= reads}
+        db.put(QUIET_READS, sorted(reads) if quiet_f - done_f else [])
+        if done_f or db.get("baselined_franchises", None) is None:
+            db.put("baselined_franchises", sorted(set(known_f) | done_f))
         db.run(
             "UPDATE runs SET finished=?, status=?, listings=?, kept=?, new_cels=?, llm_calls=?, llm_cost=?,"
             " alerts=? WHERE id=?",
