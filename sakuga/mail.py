@@ -2,8 +2,8 @@
 
 It goes out with the digest each morning, even when nothing is new, so a quiet day reads as quiet
 rather than broken. Photos are embedded as inline attachments (Outlook blocks remote images) from
-the catalogue's own copies, shrunk to thumbnails. Where it starts is kept by cel id and run id, so
-a cel written by a sweep that overlaps the send is caught by the next email rather than skipped.
+the catalogue's own copies, shrunk to thumbnails. Each cel it carries is marked (cels.mailed), so a
+cel is emailed once, and one the email missed while the relay was down goes in the next one.
 """
 
 from __future__ import annotations
@@ -25,12 +25,10 @@ from .filters import FRANCHISES
 
 log = logging.getLogger(__name__)
 
-LAST_CEL = "mail_last_cel"  # kv: the newest cel id the last sent email covered
-FIRST_CEL = "mail_first_cel"  # kv: where the first email starts, until one is sent
 LAST_RUN = "mail_last_run"  # kv: the newest finished run the last sent email covered
 LAST_HTML = "mail_last_html"  # kv: the last sent email, with web photo links
 LAST_RESULT = "mail_last_result"
-MAX_CELS = 40  # per email; the rest are a link to the Today page
+MAX_PHOTOS = 60  # thumbnails per email; later cels are listed without one
 THUMB = 240  # px, longest side
 CODES = {
     "Yahoo": "Y",
@@ -43,12 +41,6 @@ HERE = Path(__file__).resolve().parent
 ENV = Environment(
     loader=FileSystemLoader(HERE / "templates"), autoescape=select_autoescape(["html"])
 )
-
-
-def _start_cel(db: DB) -> int:
-    """Where the first email starts: after the cels the last Pushover digest already announced."""
-    row = db.one("SELECT MAX(id) n FROM cels WHERE baseline = 1 OR digest_id IS NOT NULL")
-    return int(row["n"] or 0) if row else 0
 
 
 def _view(db: DB, row) -> dict:
@@ -80,20 +72,12 @@ def _view(db: DB, row) -> dict:
 
 
 def gather(db: DB, now: dt.datetime | None = None) -> dict:
-    """What the email would say right now; ``last_cel``/``last_run`` are where the next one starts."""
-    after_cel = db.get(LAST_CEL, None)
-    if after_cel is None:  # first email: kept until one is sent, so a failed send loses nothing
-        after_cel = db.get(FIRST_CEL, None)
-        if after_cel is None:
-            after_cel = _start_cel(db)
-            db.put(FIRST_CEL, after_cel)
-    top = db.one("SELECT MAX(id) n FROM cels")
-    last_cel = max(int(after_cel), int(top["n"] or 0) if top else 0)
+    """What the email would say right now; ``last_run`` is where the next one's sweeps start.
+    A cel GAINAX's instant alert announced is not repeated here (announced once, as in pending()).
+    """
     rows = db.all(
-        "SELECT * FROM cels WHERE id > ? AND id <= ? AND baseline = 0 AND rejected = 0"
-        " ORDER BY gainax DESC, id DESC",
-        after_cel,
-        last_cel,
+        "SELECT * FROM cels WHERE mailed IS NULL AND baseline = 0 AND rejected = 0"
+        " AND instant_sent IS NULL ORDER BY id DESC"
     )
     cels = [_view(db, r) for r in rows]
 
@@ -130,7 +114,6 @@ def gather(db: DB, now: dt.datetime | None = None) -> dict:
         "bad_runs": sum(1 for r in runs if r["status"] == "failed"),
         "failed_sources": [(r["name"], r["n"]) for r in failed_sources],
         "cost": sum(r["llm_cost"] or 0 for r in runs),
-        "last_cel": last_cel,
         "last_run": last_run,
     }
 
@@ -161,16 +144,12 @@ def _thumb(path: Path) -> bytes | None:
 def render(s: Settings, g: dict, img) -> tuple[str, str]:
     """(html, plain text). ``img(cel)`` returns the photo's src, or '' for none."""
     title = subject(g)
-    html = ENV.get_template("digest_email.html").render(
-        g=g, img=img, link=s.link, cap=MAX_CELS, title=title
-    )
+    html = ENV.get_template("digest_email.html").render(g=g, img=img, link=s.link, title=title)
     lines = [title, ""]
-    for c in g["cels"][:MAX_CELS]:
+    for c in g["cels"]:
         price = f"¥{c['yen']:,}" if c["yen"] else (f"£{c['gbp']:,.0f}" if c["gbp"] else "")
         url = s.link(f"/cel/{c['id']}")
         lines.append(f"{c['code']}  {c['title']}  {price}  {url}")
-    if len(g["cels"]) > MAX_CELS:
-        lines.append(f"And {len(g['cels']) - MAX_CELS} more: {s.link('/today')}")
     lines += ["", health_text(g), "", s.link("/today")]
     return html, "\n".join(lines)
 
@@ -189,8 +168,8 @@ def health_text(g: dict) -> str:
 def send(s: Settings, g: dict) -> str:
     """Send the email; 'sent' or 'failed: <reason>'."""
     cids: dict[str, tuple[str, bytes]] = {}
-    for c in g["cels"][:MAX_CELS]:
-        if c["image"] and c["image"] not in cids:
+    for c in g["cels"]:
+        if len(cids) < MAX_PHOTOS and c["image"] and c["image"] not in cids:
             data = _thumb(s.img_dir / c["image"])
             if data:
                 cids[c["image"]] = (make_msgid(domain="sakuga")[1:-1], data)
@@ -223,13 +202,17 @@ def send(s: Settings, g: dict) -> str:
 
 
 def run(db: DB, s: Settings) -> str:
-    """Gather, send, and move the start point on only when the email went. Off when unconfigured."""
+    """Gather, send, and mark what it carried only when the email went. Off when unconfigured."""
     if not s.mail_on:
         return "off"
     g = gather(db)
     res = send(s, g)
     if res == "sent":
-        db.put(LAST_CEL, g["last_cel"])
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with db.tx() as con:
+            con.executemany(
+                "UPDATE cels SET mailed = ? WHERE id = ?", [(stamp, c["id"]) for c in g["cels"]]
+            )
         db.put(LAST_RUN, g["last_run"])
         web = render(s, g, lambda c: s.link(f"/img/{c['image']}") if c["image"] else "")[0]
         db.put(LAST_HTML, web)

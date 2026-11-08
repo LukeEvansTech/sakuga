@@ -34,7 +34,7 @@
 
   {% if g.cels %}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:20px;">
-  {% for cel in g.cels[:cap] %}
+  {% for cel in g.cels %}
   {% set href = link('/cel/' ~ cel.id) %}
   <tr>
     <td width="108" valign="top" style="padding:12px 12px 12px 0;border-top:1px solid {{ c.rule }};">
@@ -56,7 +56,6 @@
   </tr>
   {% endfor %}
   </table>
-  {% if g.cels | length > cap %}<p style="margin:8px 0 0;font-size:14px;color:{{ c.ink2 }};">And {{ g.cels | length - cap }} more on the <a href="{{ link('/today') }}" style="color:{{ c.biro }};">Today page</a>.</p>{% endif %}
   {% endif %}
 
   <p style="margin:28px 0 0;padding-top:16px;border-top:1px solid {{ c.rule }};font-size:13px;color:{{ c.ink3 }};">

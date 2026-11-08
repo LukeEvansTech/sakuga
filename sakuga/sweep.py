@@ -732,7 +732,7 @@ def _digest(db: DB, s: Settings, notify_on: bool = True) -> str:
     email = mail.run(db, s) if notify_on else "off"
     if not cels:
         log.info("digest: nothing new (email %s)", email)
-        return "nothing new"
+        return email if email.startswith("failed") else "nothing new"
     by: dict[str, int] = {}
     for c in cels:
         by[c["franchise"]] = by.get(c["franchise"], 0) + 1

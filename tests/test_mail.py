@@ -95,7 +95,7 @@ def test_failed_email_keeps_its_start(mailed, monkeypatch):  # pylint: disable=r
     FakeSMTP.fail = True
     assert sweep.digest(db, s) == "failed: OSError"
     assert len(sweep.pending(db)) == 2
-    assert db.get(mail.LAST_CEL, None) is None
+    assert db.one("SELECT COUNT(*) n FROM cels WHERE mailed IS NOT NULL")["n"] == 0
 
     # Pushover delivers while the relay is down: the cels are digested, and still emailed later.
     s2 = dataclasses.replace(s, apprise_urls="json://localhost")
@@ -105,6 +105,10 @@ def test_failed_email_keeps_its_start(mailed, monkeypatch):  # pylint: disable=r
     FakeSMTP.fail = False
     assert mail.run(db, s) == "sent"
     assert FakeSMTP.sent[-1]["Subject"].startswith("Sakuga: 2 new cels")
+
+    # A quiet day whose email fails is a failure, not "nothing new".
+    FakeSMTP.fail = True
+    assert sweep.digest(db, s) == "failed: OSError"
 
 
 def test_new_cel_after_an_email(mailed):  # pylint: disable=redefined-outer-name
@@ -118,6 +122,42 @@ def test_new_cel_after_an_email(mailed):  # pylint: disable=redefined-outer-name
     )
     g = mail.gather(db)
     assert [c["id"] for c in g["cels"]] == [4]
+    # A cel GAINAX's instant alert announced is not news again; nor is a reused id's old cel.
+    db.run("UPDATE cels SET instant_sent = ? WHERE id = 4", T)
+    assert mail.gather(db)["cels"] == []
+    db.run("DELETE FROM listings WHERE cel_id = 3")
+    db.run("DELETE FROM cels WHERE id = 3")
+    db.run(
+        "INSERT INTO cels (id, franchise, kind, title_en, first_seen, last_seen)"
+        " VALUES (3, 'eva', 'cel', 'Asuka', ?, ?)",
+        T,
+        T,
+    )
+    assert [c["id"] for c in mail.gather(db)["cels"]] == [3]
+
+
+def test_migration_marks_what_pushover_announced(tmp_path):
+    import sqlite3
+
+    from sakuga.db import DB
+
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.executescript(
+        "CREATE TABLE cels (id INTEGER PRIMARY KEY, franchise TEXT NOT NULL, kind TEXT NOT NULL,"
+        " title_en TEXT NOT NULL DEFAULT '', title_jp TEXT NOT NULL DEFAULT '',"
+        " notes TEXT NOT NULL DEFAULT '', image TEXT NOT NULL DEFAULT '',"
+        " phash TEXT NOT NULL DEFAULT '', gainax INTEGER NOT NULL DEFAULT 0,"
+        " baseline INTEGER NOT NULL DEFAULT 0, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,"
+        " available INTEGER NOT NULL DEFAULT 1, digest_id INTEGER, instant_sent TEXT,"
+        " rejected INTEGER NOT NULL DEFAULT 0);"
+        "INSERT INTO cels (id, franchise, kind, baseline, digest_id, first_seen, last_seen) VALUES"
+        " (1, 'eva', 'cel', 1, NULL, 't', 't'), (2, 'eva', 'cel', 0, 5, 't', 't'),"
+        " (3, 'eva', 'cel', 0, NULL, 't', 't');"
+    )
+    con.close()
+    db = DB(path)
+    assert [c["id"] for c in mail.gather(db)["cels"]] == [3]
 
 
 def test_web_copy(mailed):  # pylint: disable=redefined-outer-name
