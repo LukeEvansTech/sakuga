@@ -207,7 +207,9 @@ def run(db: DB, s: Settings) -> tuple[str, list[int]]:
     Returns the result and the ids of the cels the email delivered."""
     if not s.mail_on:
         return "off", []
-    g = gather(db)
+    from zoneinfo import ZoneInfo  # pylint: disable=import-outside-toplevel
+
+    g = gather(db, dt.datetime.now(ZoneInfo(s.timezone)))
     res = send(s, g)
     if res == "sent":
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
