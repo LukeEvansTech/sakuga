@@ -656,3 +656,15 @@ def test_a_held_photo_keeps_its_relist_quiet(env, monkeypatch):
     got = sweep.ingest(db, s, _Says({"kind": "cel", "franchise": "kiki"}), [relist], 200.0, False)
     assert not got["new_cels"]
     assert db.get(sweep.QUIET_HELD, None) == [["yahoo:o4", "0f0f0f0f0f0f0f0f"]]
+
+
+def test_pounds_under_every_yen_price(env):
+    s, db = env
+    db.run("UPDATE listings SET gbp = 600 WHERE id = 'yahoo:a2'")  # the site's own figure: ¥200/£
+    db.run("UPDATE listings SET gbp = NULL WHERE id = 'yahoo:a3'")  # none: converted at that rate
+    c = TestClient(create_app(s, db))
+    assert '<span class="gbp">£600</span>' in c.get("/cel/2").text
+    assert "£600" in c.get("/today").text and "£600" in c.get("/catalogue").text
+    page = c.get("/cel/3").text
+    assert '<span class="gbp">£600</span>' in page  # ¥120,000 at ¥200 a pound
+    assert '<span class="gbp">£495</span>' in page  # Mercari ¥99,000

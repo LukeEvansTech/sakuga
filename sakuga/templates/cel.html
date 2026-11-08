@@ -21,7 +21,7 @@
   {% if c.title_en and c.title_jp and c.title_en != c.title_jp %}<p class="jp" lang="ja">{{ c.title_jp }}</p>{% endif %}
 
   <dl class="facts">
-    <div><dt>Price now</dt><dd class="num">{% if c.best.yen %}{{ c.best.yen | yen }}{% if c.best.gbp %} <small>~{{ c.best.gbp | gbp }}</small>{% endif %}{% else %}{{ c.best.gbp | gbp or 'Not shown' }}{% endif %}</dd></div>
+    <div><dt>Price now</dt><dd class="num">{% if c.best.yen %}{{ c.best.yen | yen }}<small class="gbp">{{ c.best.yen | in_gbp(c.best.gbp) }}</small>{% else %}{{ c.best.gbp | gbp or 'Not shown' }}{% endif %}</dd></div>
     <div><dt>Status</dt><dd>{% if c.available %}For sale on {{ c.sources | join(', ') }}{% else %}No longer for sale{% endif %}</dd></div>
     <div><dt>First seen</dt><dd>{{ c.first_seen | local }}</dd></div>
     <div><dt>On the market</dt><dd><span class="num">{{ c.days }}</span> day{{ '' if c.days == 1 else 's' }}
@@ -36,11 +36,11 @@
     <li class="{{ '' if x.active else 'is-gone' }}">
       <div class="s-top">
         <span class="s-site">{{ x.source }}</span>
-        <span class="num">{% if x.yen %}{{ x.yen | yen }}{% else %}{{ x.gbp | gbp }}{% endif %}</span>
+        <span class="num">{% if x.yen %}{{ x.yen | yen }}<span class="gbp">{{ x.yen | in_gbp(x.gbp) }}</span>{% else %}{{ x.gbp | gbp }}{% endif %}</span>
       </div>
       <p class="s-meta">{{ x.info or ('auction' if x.auction else 'fixed price') }} · seen {{ x.first_seen | local }}{% if not x.active %} · gone {{ x.last_seen | local }}{% endif %}</p>
       {% set h = history.get(x.id, []) %}
-      {% if h | length > 1 %}<p class="s-hist num">{% for p in h %}{{ p.yen | yen }}{{ ' → ' if not loop.last }}{% endfor %}</p>{% endif %}
+      {% if h | length > 1 %}<p class="s-hist num">{% for p in h %}{{ p.yen | yen }} <span class="gbp-inline">({{ p.yen | in_gbp }})</span>{{ ' → ' if not loop.last }}{% endfor %}</p>{% endif %}
       <a class="out" href="{{ x.url }}" rel="noopener noreferrer" target="_blank">Open on {{ 'Buyee' if x.source == 'Yahoo' else x.source }}<svg class="out-icon" aria-hidden="true"><use href="#out"/></svg></a>
     </li>
     {% endfor %}

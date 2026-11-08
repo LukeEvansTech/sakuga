@@ -16,7 +16,7 @@
       {% if gone %}<svg class="strike" aria-hidden="true" preserveAspectRatio="none"><use href="#strike"/></svg>{% endif %}
     </span>
     <span class="t">{{ c.title }}</span>
-    <span class="price">{% if c.best.yen %}{{ c.best.yen | yen }}{% else %}{{ c.best.gbp | gbp or 'No price' }}{% endif %}</span>
+    <span class="price">{% if c.best.yen %}{{ c.best.yen | yen }}<span class="gbp">{{ c.best.yen | in_gbp(c.best.gbp) }}</span>{% else %}{{ c.best.gbp | gbp or 'No price' }}{% endif %}</span>
     <span class="sub">{{ c.label }}{% if c.kind != 'cel' %} · {{ c.kind }}{% endif %}{% if c.gainax %} · GAINAX{% endif %}</span>
   </a>
 </li>

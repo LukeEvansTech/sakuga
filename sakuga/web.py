@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import re
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -49,6 +50,21 @@ def yen(v) -> str:
 
 def gbp(v) -> str:
     return f"£{float(v):,.0f}" if v else ""
+
+
+FALLBACK_RATE = 199.0  # yen per pound, until any listing has shown both prices
+
+
+def yen_per_gbp(db: DB) -> float:
+    """The rate the sites themselves quote: the median of yen/pound over the latest listings that show
+    both (Buyee and Mercari give a pound figure). Used for a price with no pound figure of its own.
+    """
+    rows = db.all(
+        "SELECT yen * 1.0 / gbp r FROM listings WHERE yen > 0 AND gbp > 0"
+        " ORDER BY last_seen DESC LIMIT 101"
+    )
+    rates = sorted(r["r"] for r in rows)
+    return rates[len(rates) // 2] if rates else FALLBACK_RATE
 
 
 def ago(s: str | None) -> str:
@@ -100,7 +116,21 @@ def create_app(s: Settings, db: DB | None = None, start_scheduler: bool = False)
     app = FastAPI(title="sakuga", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     tpl = Jinja2Templates(directory=HERE / "templates")
-    tpl.env.filters.update(yen=yen, gbp=gbp, ago=ago, local=lambda v: local_time(v, s.timezone))
+    rate = {"v": FALLBACK_RATE, "at": 0.0}
+
+    def in_gbp(yen_v, gbp_v=None) -> str:
+        """A price in pounds: the site's own figure, else the yen at the sites' current rate."""
+        if gbp_v:
+            return gbp(gbp_v)
+        if not yen_v:
+            return ""
+        if time.monotonic() - rate["at"] > 600:
+            rate.update(v=yen_per_gbp(db), at=time.monotonic())
+        return gbp(yen_v / rate["v"])
+
+    tpl.env.filters.update(
+        yen=yen, gbp=gbp, in_gbp=in_gbp, ago=ago, local=lambda v: local_time(v, s.timezone)
+    )
     tpl.env.globals.update(
         version=s.version,
         franchises=FRANCHISES,

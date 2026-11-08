@@ -633,6 +633,7 @@ button:disabled {
 .s-top .num {
   font-size: 18px;
   font-weight: 600;
+  text-align: right;
 }
 
 .s-meta {
@@ -800,4 +801,16 @@ details summary {
 .facts code {
   font: inherit;
   color: var(--gold);
+}
+
+/* the pound equivalent, on its own line under every yen price */
+.gbp {
+  display: block;
+  font-size: 0.8em;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.gbp-inline {
+  color: var(--ink-2);
 }
