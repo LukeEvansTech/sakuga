@@ -3,7 +3,9 @@
 # rewrites the whole repo. Install once per clone: `lefthook install`. CI stays the authority.
 
 [pre-commit]
-parallel = true
+# In order, formatting first (priority 1): run in parallel, a linter can reject a line black is
+# about to fix.
+parallel = false
 
 [pre-commit.commands.format-python]
 run = "uvx isort --quiet --settings-path .github/linters/.isort.cfg {staged_files} && uvx black --quiet --config .github/linters/.python-black {staged_files}"
