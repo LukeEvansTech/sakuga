@@ -483,17 +483,20 @@ def recheck_dragon_ball(db: DB) -> int:
     character but Broly, Vegeta and Goku "other" are judged again, now that the series is what counts.
 
     One that held a cel waits hidden for backfill, which brings it back if the LLM now agrees; one
-    rejected on first sight has no cel, so it is forgotten and the next sweep reads it as new.
+    rejected on first sight has no cel, so it is forgotten and the next sweep reads it as new, as is
+    a relist that inherited such a rejection by its photo.
     Returns the number sent.
     """
     if db.get(DB_SERIES, False):
         return 0
     labels = [FRANCHISES[k]["label"] for k in sorted(catalog.DRAGON_BALL) if k in FRANCHISES]
+    rejected = db.all("SELECT id, cel_id, reason FROM listings WHERE ok = 0")
     rows = [
-        r
-        for r in db.all("SELECT id, cel_id, reason FROM listings WHERE ok = 0")
-        if any(r["reason"].startswith(f"LLM: not {label},") for label in labels)
+        r for r in rejected if any(r["reason"].startswith(f"LLM: not {label},") for label in labels)
     ]
+    # A relist that inherited one of those rejections by its photo goes with it.
+    ids = {r["id"] for r in rows}
+    rows += [r for r in rejected if r["reason"].removeprefix("same photo as rejected ") in ids]
     with NOTIFY_LOCK, db.tx() as con:
         for r in rows:
             if r["cel_id"] is None:
@@ -521,7 +524,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
         "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id, l.hinted,"
         " c.gainax FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
         # A rejected listing is asked again only when sent back (recheck_dragon_ball).
-        " WHERE (l.ok = 1 AND l.verdict = '' OR l.recheck = 1)"
+        " WHERE (l.ok = 1 AND l.verdict = '' OR l.recheck = 1) AND (l.ok = 1 OR l.cel_id IS NOT NULL)"
         " AND l.image != ''"  # sold ones too: they hold a cel visible
         # Never asked first, newest first; then the longest since the last try, so failures rotate.
         " ORDER BY l.asked IS NOT NULL, l.asked, l.first_seen DESC LIMIT ?",

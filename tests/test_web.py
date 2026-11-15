@@ -690,9 +690,17 @@ def test_dragon_ball_cels_rejected_by_character_are_judged_again(env):
     db.run(
         "UPDATE listings SET ok = 0, reason = 'LLM: not Eva, whatever the title says' WHERE id = 'yahoo:a3'"
     )
-    assert sweep.recheck_dragon_ball(db) == 2
+    db.run(
+        "INSERT INTO listings (id, source, title, url, franchise, kind, ok, reason, first_seen, last_seen)"
+        " VALUES ('yahoo:n2', 'Yahoo', 'セル画', 'https://example.invalid/r', 'goku', 'cel', 0,"
+        " 'same photo as rejected yahoo:a2', ?, ?)",
+        T,
+        T,
+    )
+    assert sweep.recheck_dragon_ball(db) == 3
     assert sweep.recheck_dragon_ball(db) == 0  # once only
-    assert db.one("SELECT id FROM listings WHERE id = 'yahoo:n1'") is None  # read afresh next sweep
+    for gone in ("yahoo:n1", "yahoo:n2"):  # read afresh next sweep
+        assert db.one("SELECT id FROM listings WHERE id = ?", gone) is None
     assert db.one("SELECT recheck FROM listings WHERE id = 'yahoo:a3'")["recheck"] == 0
     sweep.backfill(db, _Says({"kind": "cel", "franchise": "dragonball"}), s)
     sweep.reconcile_hidden(db)
