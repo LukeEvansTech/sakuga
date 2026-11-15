@@ -777,8 +777,8 @@ def run(
         if known_f is None:
             known_f = list(FIRST_FRANCHISES) if not baseline else []
         quiet_f = set(FRANCHISES) - set(known_f)
+        recheck_dragon_ball(db)  # before ingest, so no relist inherits a rejection it reverses
         got = ingest(db, s, model, raws, rate, baseline, quiet, quiet_f)
-        recheck_dragon_ball(db)
         recheck_wrong_show(db)
         backfill(db, model, s)
         reconcile_hidden(db)
