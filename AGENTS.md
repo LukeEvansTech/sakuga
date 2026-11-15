@@ -24,7 +24,8 @@ how to run it; this file holds what the code does not say.
   this sweep, or live cels go dark.
 - **The first sweep is a baseline.** Its cels carry `baseline = 1` and never reach a digest. So does a
   source (`baselined_sources`) or franchise (`baselined_franchises`) added later, until it has read once.
-- **The regular expression keeps the franchise; the LLM may only narrow.** `catalog.keep` lets the LLM drop a
-  print or a reproduction, never add a franchise. The one franchise not from the title is a Yahoo
-  category's hint (`hinted`), and it stands only when the LLM names the same one.
+- **The regular expression finds the franchise; the LLM may only narrow.** `catalog.keep` lets the LLM drop
+  another show, a print or a reproduction, never add a franchise. Yahoo titles are padded with other shows'
+  names, so a title's franchise stands only when the LLM names it too (`catalog.wrong_show`; Dragon Ball's
+  broly, vegeta and goku count as one). A Yahoo category's hint (`hinted`) needs the same.
 - **Do not add evasion of bot checks** (stealth patches, captcha solving). A blocked load is retried as is.

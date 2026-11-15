@@ -112,7 +112,18 @@ def test_scheduler_waits_across_the_autumn_clock_change():
 
 def test_hinted_franchise_stands_only_when_the_llm_names_it():
     v = {"kind": "cel", "franchise": "other"}
-    assert keep("eva", "cel", v).ok  # named by the title: the LLM may not take it away
     out = keep("eva", "cel", v, hinted=True)
     assert (out.ok, out.reason) == (False, "LLM: not Eva, though filed there")
     assert keep("eva", "cel", {"kind": "cel", "franchise": "eva"}, hinted=True).ok
+    assert not keep("eva", "cel", {"kind": "cel"}, hinted=True).ok
+
+
+def test_a_padded_title_does_not_outvote_the_photos():
+    # 2026-11-15: "セル画★ヅ0らんま1/2名探偵コナン灰原エヴァンゲリオン綾波レイ...七つの海のティコ" is a Tico cel.
+    out = keep("eva", "cel", {"kind": "cel", "franchise": "other"})
+    assert (out.ok, out.reason) == (False, "LLM: not Eva, whatever the title says")
+    assert not keep("kiki", "cel", {"kind": "cel", "franchise": "broly"}).ok
+    assert keep("eva", "cel", {"kind": "cel", "franchise": "eva"}).ok
+    assert keep("eva", "cel", {"kind": "cel"}).ok  # a verdict from before the field: no say
+    assert keep("goku", "cel", {"kind": "cel", "franchise": "vegeta"}).ok  # one cel, both of them
+    assert keep("broly", "cel", {"kind": "cel", "franchise": "goku"}).ok

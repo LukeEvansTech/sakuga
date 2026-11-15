@@ -646,6 +646,33 @@ def test_backfill_keeps_the_category_rule(env):
     assert (row["ok"], row["reason"]) == (0, "LLM: not Eva, though filed there")
 
 
+def test_stored_verdicts_naming_another_show_are_asked_again(env):
+    s, db = env
+    db.run("UPDATE listings SET image = 'a.jpg'")
+    db.run(
+        """UPDATE listings SET verdict = '{"kind": "cel", "franchise": "other"}' WHERE id = 'yahoo:a2'"""
+    )
+    db.run(
+        """UPDATE listings SET verdict = '{"kind": "cel", "franchise": "eva"}' WHERE id = 'yahoo:a3'"""
+    )
+    db.run("""UPDATE listings SET verdict = '{"kind": "cel"}' WHERE id = 'mercari:m3'""")
+    db.run(
+        """UPDATE listings SET verdict = '{"kind": "cel", "franchise": "eva"}' WHERE id = 'yahoo:a1'"""
+    )
+    assert sweep.recheck_wrong_show(db) == 1
+    assert sweep.recheck_wrong_show(db) == 0  # already waiting
+    sweep.backfill(db, _Says({"kind": "cel", "franchise": "other"}), s)
+    sweep.reconcile_hidden(db)
+    row = db.one("SELECT ok, reason, recheck FROM listings WHERE id = 'yahoo:a2'")
+    assert (row["ok"], row["reason"], row["recheck"]) == (
+        0,
+        "LLM: not Eva, whatever the title says",
+        0,
+    )
+    got = {r["id"]: r["rejected"] for r in db.all("SELECT id, rejected FROM cels")}
+    assert got == {1: 0, 2: 1, 3: 0}
+
+
 def test_a_held_photo_keeps_its_relist_quiet(env, monkeypatch):
     s, db = env
     monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("o.jpg", "0f0f0f0f0f0f0f0f"))
