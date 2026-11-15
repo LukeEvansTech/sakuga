@@ -673,6 +673,35 @@ def test_stored_verdicts_naming_another_show_are_asked_again(env):
     assert got == {1: 0, 2: 1, 3: 0}
 
 
+def test_dragon_ball_cels_rejected_by_character_are_judged_again(env):
+    s, db = env
+    db.run("UPDATE cels SET franchise = 'goku', rejected = 1 WHERE id = 2")
+    db.run(
+        "UPDATE listings SET franchise = 'goku', ok = 0, image = 'a.jpg',"
+        " reason = 'LLM: not Goku, whatever the title says' WHERE id = 'yahoo:a2'"
+    )
+    db.run(
+        "INSERT INTO listings (id, source, title, url, franchise, kind, ok, reason, first_seen, last_seen)"
+        " VALUES ('yahoo:n1', 'Yahoo', 'セル画', 'https://example.invalid/n', 'goku', 'cel', 0,"
+        " 'LLM: not Goku, whatever the title says', ?, ?)",
+        T,
+        T,
+    )
+    db.run(
+        "UPDATE listings SET ok = 0, reason = 'LLM: not Eva, whatever the title says' WHERE id = 'yahoo:a3'"
+    )
+    assert sweep.recheck_dragon_ball(db) == 1  # yahoo:n1 holds no cel
+    assert sweep.recheck_dragon_ball(db) == 0  # once only
+    db.run("UPDATE listings SET verdict = '{}', phash = '0f0f0f0f0f0f0f0f' WHERE id = 'yahoo:a2'")
+    assert sweep.rejected_twin(db, "goku", "0f0f0f0f0f0f0f0f") is None  # no inheriting it meanwhile
+    assert db.one("SELECT recheck FROM listings WHERE id = 'yahoo:a3'")["recheck"] == 0
+    sweep.backfill(db, _Says({"kind": "cel", "franchise": "dragonball"}), s)
+    sweep.reconcile_hidden(db)
+    row = db.one("SELECT ok, reason, recheck FROM listings WHERE id = 'yahoo:a2'")
+    assert (row["ok"], row["reason"], row["recheck"]) == (1, "", 0)
+    assert db.one("SELECT rejected FROM cels WHERE id = 2")["rejected"] == 0
+
+
 def test_a_held_photo_keeps_its_relist_quiet(env, monkeypatch):
     s, db = env
     monkeypatch.setattr(sweep.images, "download", lambda *a, **k: ("o.jpg", "0f0f0f0f0f0f0f0f"))

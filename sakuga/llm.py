@@ -26,7 +26,7 @@ CLASSIFY = """You catalogue Japanese anime production art for a collector. Read 
 {"kind": "cel" | "genga" | "douga" | "reproduction" | "print" | "not_art",
  "gainax_limited": true|false,
  "cel_club": true|false,
- "franchise": {franchises} | "other",
+ "franchise": {franchises} | "dragonball" | "other",
  "characters": ["English names"],
  "episode_cut": "e.g. ep 24 C-298, or empty",
  "background": true|false,
@@ -45,11 +45,12 @@ Definitions:
 - not_art: figures, books, goods, anything else.
 - franchise: {franchise_names}.
 - broly, vegeta and goku are Dragon Ball's Broly (ブロリー), Vegeta (ベジータ) and Son Goku (孫悟空) only;
-  a cel showing more than one is the first of broly, vegeta, goku. Other Dragon Ball characters are "other".
+  a cel showing more than one is the first of broly, vegeta, goku. A Dragon Ball cel (any series or film)
+  showing none of the three is "dragonball".
 - franchise is the show the artwork itself is from. Sellers pad titles with other shows' names (a voice
   actor's or animator's other work, such as "エヴァンゲリオン綾波レイ役林原めぐみ出演"), usually ahead of the real
   show, which tends to come last; name the show the characters in the photos belong to. Answer "other"
-  only when you can tell the artwork is from another show, or shows none of the characters named above;
+  only when you can tell the artwork is from another show;
   when the photos cannot tell (a hand, a background, an unclear face), go by the title.
   A fusion of goku and vegeta (Gogeta, Vegito) is vegeta.
 Judge from the photos as well as the words: a glossy printed card or a book page is not a cel.

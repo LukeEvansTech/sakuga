@@ -433,7 +433,8 @@ def rejected_twin(db: DB, franchise: str, ph: str):
     keys = filters.scope(franchise)
     rows = db.all(
         f"SELECT id, kind, phash FROM listings WHERE franchise IN ({','.join('?' * len(keys))})"
-        " AND ok = 0 AND verdict != '' AND phash != ''",
+        " AND ok = 0 AND verdict != '' AND phash != ''"
+        " AND NOT (recheck = 1 AND cel_id IS NOT NULL)",  # a rejection waiting to be judged again
         *keys,
     )
     return next((r for r in rows if images.distance(ph, r["phash"]) <= catalog.NEAR), None)
@@ -475,6 +476,34 @@ def recheck_wrong_show(db: DB) -> int:
     return sent
 
 
+DB_SERIES = "dragonball_series_rechecked"  # kv: the one-off below has run
+
+
+def recheck_dragon_ball(db: DB) -> int:
+    """Once: Dragon Ball listings the LLM rejected on a second look as another show, under the prompt
+    that called every character but Broly, Vegeta and Goku "other", wait hidden for backfill, which
+    brings them back if the LLM now names the series. Returns the number sent.
+
+    One rejected on first sight holds no cel and is left as it is: none had been by 2026-11-15 09:30,
+    and the rule had stood for under two hours.
+    """
+    if db.get(DB_SERIES, False):
+        return 0
+    labels = [FRANCHISES[k]["label"] for k in sorted(catalog.DRAGON_BALL) if k in FRANCHISES]
+    rows = [
+        r
+        for r in db.all("SELECT id, reason FROM listings WHERE ok = 0 AND cel_id IS NOT NULL")
+        if any(r["reason"].startswith(f"LLM: not {label},") for label in labels)
+    ]
+    with NOTIFY_LOCK, db.tx() as con:
+        for r in rows:
+            con.execute("UPDATE listings SET recheck = 1 WHERE id = ?", (r["id"],))
+        con.execute(
+            "INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", (DB_SERIES, json.dumps(True))
+        )
+    return len(rows)
+
+
 MAX_BACKFILL = 10
 
 
@@ -488,7 +517,8 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
     rows = db.all(
         "SELECT l.id, l.title, l.extra, l.yen, l.gbp, l.image, l.photos, l.franchise, l.cel_id, l.hinted,"
         " c.gainax FROM listings l LEFT JOIN cels c ON c.id = l.cel_id"
-        " WHERE l.ok = 1 AND (l.verdict = '' OR l.recheck = 1)"
+        # A rejected listing is asked again only when sent back (recheck_dragon_ball).
+        " WHERE (l.ok = 1 AND l.verdict = '' OR l.recheck = 1) AND (l.ok = 1 OR l.cel_id IS NOT NULL)"
         " AND l.image != ''"  # sold ones too: they hold a cel visible
         # Never asked first, newest first; then the longest since the last try, so failures rotate.
         " ORDER BY l.asked IS NOT NULL, l.asked, l.first_seen DESC LIMIT ?",
@@ -526,7 +556,7 @@ def backfill(db: DB, llm: LLM, s: Settings, limit: int = MAX_BACKFILL) -> int:
                 log.info("listing %s dropped on a second look: %s", r["id"], k.reason)
                 continue
             con.execute(
-                "UPDATE listings SET verdict=?, kind=?, recheck=0 WHERE id=?",
+                "UPDATE listings SET verdict=?, kind=?, recheck=0, ok=1, reason='' WHERE id=?",
                 (_json(verdict), k.kind, r["id"]),
             )
             con.execute(
@@ -747,6 +777,7 @@ def run(
         if known_f is None:
             known_f = list(FIRST_FRANCHISES) if not baseline else []
         quiet_f = set(FRANCHISES) - set(known_f)
+        recheck_dragon_ball(db)  # before ingest, so no relist inherits a rejection it reverses
         got = ingest(db, s, model, raws, rate, baseline, quiet, quiet_f)
         recheck_wrong_show(db)
         backfill(db, model, s)
