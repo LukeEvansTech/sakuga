@@ -433,7 +433,8 @@ def rejected_twin(db: DB, franchise: str, ph: str):
     keys = filters.scope(franchise)
     rows = db.all(
         f"SELECT id, kind, phash FROM listings WHERE franchise IN ({','.join('?' * len(keys))})"
-        " AND ok = 0 AND verdict != '' AND phash != ''",
+        " AND ok = 0 AND verdict != '' AND phash != ''"
+        " AND NOT (recheck = 1 AND cel_id IS NOT NULL)",  # a rejection waiting to be judged again
         *keys,
     )
     return next((r for r in rows if images.distance(ph, r["phash"]) <= catalog.NEAR), None)
@@ -479,31 +480,24 @@ DB_SERIES = "dragonball_series_rechecked"  # kv: the one-off below has run
 
 
 def recheck_dragon_ball(db: DB) -> int:
-    """Once: Dragon Ball listings the LLM rejected as another show under the prompt that called every
-    character but Broly, Vegeta and Goku "other" are judged again, now that the series is what counts.
+    """Once: Dragon Ball listings the LLM rejected on a second look as another show, under the prompt
+    that called every character but Broly, Vegeta and Goku "other", wait hidden for backfill, which
+    brings them back if the LLM now names the series. Returns the number sent.
 
-    One that held a cel waits hidden for backfill, which brings it back if the LLM now agrees; one
-    rejected on first sight has no cel, so it is forgotten and the next sweep reads it as new, as is
-    a relist that inherited such a rejection by its photo.
-    Returns the number sent.
+    One rejected on first sight holds no cel and is left as it is: none had been by 2026-11-15 09:30,
+    and the rule had stood for under two hours.
     """
     if db.get(DB_SERIES, False):
         return 0
     labels = [FRANCHISES[k]["label"] for k in sorted(catalog.DRAGON_BALL) if k in FRANCHISES]
-    rejected = db.all("SELECT id, cel_id, reason FROM listings WHERE ok = 0")
     rows = [
-        r for r in rejected if any(r["reason"].startswith(f"LLM: not {label},") for label in labels)
+        r
+        for r in db.all("SELECT id, reason FROM listings WHERE ok = 0 AND cel_id IS NOT NULL")
+        if any(r["reason"].startswith(f"LLM: not {label},") for label in labels)
     ]
-    # A relist that inherited one of those rejections by its photo goes with it.
-    ids = {r["id"] for r in rows}
-    rows += [r for r in rejected if r["reason"].removeprefix("same photo as rejected ") in ids]
     with NOTIFY_LOCK, db.tx() as con:
         for r in rows:
-            if r["cel_id"] is None:
-                con.execute("DELETE FROM prices WHERE listing_id = ?", (r["id"],))
-                con.execute("DELETE FROM listings WHERE id = ?", (r["id"],))
-            else:
-                con.execute("UPDATE listings SET recheck = 1 WHERE id = ?", (r["id"],))
+            con.execute("UPDATE listings SET recheck = 1 WHERE id = ?", (r["id"],))
         con.execute(
             "INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", (DB_SERIES, json.dumps(True))
         )
