@@ -451,6 +451,30 @@ def reconcile_hidden(db: DB) -> None:
         )
 
 
+def recheck_wrong_show(db: DB) -> int:
+    """Send to backfill every accepted listing whose stored verdict fails catalog.wrong_show.
+
+    Those verdicts came from before that rule, under a prompt that never warned of padded titles, so
+    the LLM is asked again rather than taken at its old word; backfill drops the listing if it still
+    names another show. Returns the number sent.
+    """
+    sent = 0
+    for r in db.all(
+        "SELECT id, franchise, verdict, hinted FROM listings"
+        " WHERE ok = 1 AND recheck = 0 AND verdict != ''"
+    ):
+        try:
+            verdict = json.loads(r["verdict"])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(verdict, dict) and catalog.wrong_show(
+            r["franchise"], verdict, bool(r["hinted"])
+        ):
+            db.run("UPDATE listings SET recheck = 1 WHERE id = ?", r["id"])
+            sent += 1
+    return sent
+
+
 MAX_BACKFILL = 10
 
 
@@ -724,6 +748,7 @@ def run(
             known_f = list(FIRST_FRANCHISES) if not baseline else []
         quiet_f = set(FRANCHISES) - set(known_f)
         got = ingest(db, s, model, raws, rate, baseline, quiet, quiet_f)
+        recheck_wrong_show(db)
         backfill(db, model, s)
         reconcile_hidden(db)
         # A source not searched at all this sweep (eBay without keys) proves nothing about its listings.

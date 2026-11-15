@@ -31,18 +31,15 @@ class Keep:
 def keep(franchise: str, regex_kind: str, verdict: dict | None, hinted: bool = False) -> Keep:
     """Combine the regex first pass (which already passed) with the LLM's reading of the photo.
 
-    The regex keeps the franchise (it reads the Japanese title, which is reliable); the LLM may
-    only narrow: a print or Cel Club, a non-GAINAX reproduction, or drawings where the franchise wants cels only.
-    A hinted franchise came from the Yahoo category alone (the title names none), and Yahoo's categories
-    hold misfiled listings: it stands only when the LLM, having seen the photo, names the same one.
+    The regex finds the franchise; the LLM may only narrow: another show, a print or Cel Club, a non-GAINAX
+    reproduction, or drawings where the franchise wants cels only.
     The caller keeps a hinted listing with no verdict out of the catalogue until it gets one.
     """
     gainax = regex_kind == "gainax-limited"
     if not verdict:
         return Keep(True, "cel" if gainax else regex_kind, gainax)
-    if hinted and verdict.get("franchise") != franchise:
-        label = FRANCHISES[franchise]["label"]
-        return Keep(False, verdict.get("kind", ""), False, f"LLM: not {label}, though filed there")
+    if reason := wrong_show(franchise, verdict, hinted):
+        return Keep(False, verdict.get("kind", ""), False, reason)
     kind = verdict.get("kind", "")
     if verdict.get("cel_club") is True:
         return Keep(False, "print", False, "LLM: Cel Club")
@@ -57,6 +54,29 @@ def keep(franchise: str, regex_kind: str, verdict: dict | None, hinted: bool = F
     if gainax:
         return Keep(True, "cel", True)
     return Keep(True, "cel" if kind == "reproduction" else kind, False)
+
+
+DRAGON_BALL = {"broly"} | {k for k, f in FRANCHISES.items() if f.get("dragonball")}
+
+
+def wrong_show(franchise: str, verdict: dict, hinted: bool = False) -> str:
+    """Why the LLM says this listing is not of its franchise, or "" when it agrees.
+
+    Yahoo sellers stuff titles with every show a voice actor or animator worked on ("エヴァンゲリオン綾波レイ役
+    林原めぐみ出演 ... 七つの海のティコ", 2026-11-15), so a franchise named in the title stands only when the LLM,
+    having seen the photos, names it too. A Dragon Ball cel naming another of its characters stands: one
+    cel often shows two. A verdict from before the field existed has no say on a title match; a hinted
+    franchise (the Yahoo category's alone) needs the LLM to name it.
+    """
+    named = verdict.get("franchise") or ""
+    if named == franchise or {named, franchise} <= DRAGON_BALL or not (named or hinted):
+        return ""
+    label = FRANCHISES[franchise]["label"]
+    return (
+        f"LLM: not {label}, though filed there"
+        if hinted
+        else f"LLM: not {label}, whatever the title says"
+    )
 
 
 @dataclass
