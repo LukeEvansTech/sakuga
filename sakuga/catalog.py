@@ -56,7 +56,8 @@ def keep(franchise: str, regex_kind: str, verdict: dict | None, hinted: bool = F
     return Keep(True, "cel" if kind == "reproduction" else kind, False)
 
 
-DRAGON_BALL = {"broly"} | {k for k, f in FRANCHISES.items() if f.get("dragonball")}
+# The check is the series, never the character: any Dragon Ball cel stands under Broly, Vegeta or Goku.
+DRAGON_BALL = {"broly", "dragonball"} | {k for k, f in FRANCHISES.items() if f.get("dragonball")}
 
 
 def wrong_show(franchise: str, verdict: dict, hinted: bool = False) -> str:
@@ -64,8 +65,8 @@ def wrong_show(franchise: str, verdict: dict, hinted: bool = False) -> str:
 
     Yahoo sellers stuff titles with every show a voice actor or animator worked on ("エヴァンゲリオン綾波レイ役
     林原めぐみ出演 ... 七つの海のティコ", 2026-11-15), so a franchise named in the title stands only when the LLM,
-    having seen the photos, names it too. A Dragon Ball cel naming another of its characters stands: one
-    cel often shows two. A verdict from before the field existed has no say on a title match; a hinted
+    having seen the photos, names it too. Any Dragon Ball cel stands under any of its three franchises,
+    whichever characters it shows. A verdict from before the field existed has no say on a title match; a hinted
     franchise (the Yahoo category's alone) needs the LLM to name it.
     """
     named = verdict.get("franchise") or ""

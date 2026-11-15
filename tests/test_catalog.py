@@ -127,3 +127,6 @@ def test_a_padded_title_does_not_outvote_the_photos():
     assert keep("eva", "cel", {"kind": "cel"}).ok  # a verdict from before the field: no say
     assert keep("goku", "cel", {"kind": "cel", "franchise": "vegeta"}).ok  # one cel, both of them
     assert keep("broly", "cel", {"kind": "cel", "franchise": "goku"}).ok
+    # the series decides, not the character: a Chi-Chi cel found by a Goku title stands
+    assert keep("goku", "cel", {"kind": "cel", "franchise": "dragonball"}).ok
+    assert not keep("goku", "cel", {"kind": "cel", "franchise": "other"}).ok  # Saiyuki's Goku

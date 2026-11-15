@@ -27,5 +27,5 @@ how to run it; this file holds what the code does not say.
 - **The regular expression finds the franchise; the LLM may only narrow.** `catalog.keep` lets the LLM drop
   another show, a print or a reproduction, never add a franchise. Yahoo titles are padded with other shows'
   names, so a title's franchise stands only when the LLM names it too (`catalog.wrong_show`; Dragon Ball's
-  broly, vegeta and goku count as one). A Yahoo category's hint (`hinted`) needs the same.
+  the series counts, not the character: any Dragon Ball cel stands under broly, vegeta or goku). A Yahoo category's hint (`hinted`) needs the same.
 - **Do not add evasion of bot checks** (stealth patches, captcha solving). A blocked load is retried as is.
