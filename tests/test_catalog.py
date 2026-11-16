@@ -98,6 +98,21 @@ def test_llm_answers_are_type_checked(monkeypatch, tmp_path):
     assert m.classify("t", "", "", []) is None
 
 
+def test_same_marks_only_the_shared_prefix_for_caching(monkeypatch, tmp_path):
+    from sakuga.llm import LLM  # pylint: disable=import-outside-toplevel
+
+    m = LLM("http://llm.invalid", "k", "claude")
+    a, b = tmp_path / "a.jpg", tmp_path / "b.jpg"
+    a.write_bytes(b"a")
+    b.write_bytes(b"b")
+    sent: list = []
+    monkeypatch.setattr(m, "_ask", lambda content, *_: sent.append(content) or {"same": True})
+    assert m.same(a, b) is True
+    text, first, second = sent[0]
+    assert "cache_control" not in text and "cache_control" not in second
+    assert first["cache_control"] == {"type": "ephemeral"}
+
+
 def test_scheduler_waits_across_the_autumn_clock_change():
     import datetime as dt  # pylint: disable=import-outside-toplevel
     from zoneinfo import ZoneInfo  # pylint: disable=import-outside-toplevel

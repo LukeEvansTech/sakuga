@@ -168,6 +168,9 @@ class LLM:
     def same(self, a: Path, b: Path) -> bool | None:
         if not self.on or not a.exists() or not b.exists():
             return None
-        v = self._ask([{"type": "text", "text": SAME}, _image_part(a), _image_part(b)], 200)
+        # group() asks up to MAX_ASKS cels against the same listing photo in a row, so the
+        # prompt plus photo a is a repeated prefix; the provider caches it from this marker.
+        first = {**_image_part(a), "cache_control": {"type": "ephemeral"}}
+        v = self._ask([{"type": "text", "text": SAME}, first, _image_part(b)], 200)
         same = v.get("same") if v else None
         return same if isinstance(same, bool) else None  # "false" as a string is not an answer
