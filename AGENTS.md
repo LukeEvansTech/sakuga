@@ -8,7 +8,8 @@ how to run it; this file holds what the code does not say.
   the email (`mail.py`).
   Rules that decide anything are pure and tested: `filters.py` (regular expression), `catalog.py` (keep, group).
 - Deployed on the talos-cluster (`kubernetes/apps/custom/sakuga`), which alerts on
-  `sakuga_last_success_timestamp_seconds` from `GET /metrics`. Live state: `/log` shows each sweep
+  `sakuga_last_success_timestamp_seconds` from `GET /metrics`. The cluster runs the image of the
+  latest `v*` tag: a merge to `main` deploys nothing until a tag is pushed and Renovate's pin PR merges. Live state: `/log` shows each sweep
   and the last email's result; the pod's database is `/data/sakuga.db` (`kv(key, value)`).
 - Linting: `.lefthook.toml` runs black, isort, flake8, pylint, ruff and mypy on commit with the
   configs in `.github/linters/` (super-linter runs the same); `lefthook install` once per clone.
