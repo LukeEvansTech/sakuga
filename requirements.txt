@@ -48,7 +48,7 @@ playwright==1.65.2
     # via -r requirements.in
 pydantic==2.14.3
     # via fastapi
-pydantic-core==2.50.4
+pydantic-core==2.50.5
     # via pydantic
 python-dateutil==4.0.0
     # via croniter
